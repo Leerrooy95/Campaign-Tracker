@@ -300,8 +300,7 @@ def fetch_schedule_a(committee_id: str, api_key: str, cycle: int,
     """
     seen_sub_ids: set = set()
     records: list[dict] = []
-    last_index = None
-    last_date = None
+    cursor: dict = {}                 # last_indexes from the previous page
     pages_total: Optional[int] = None
     page_num = 0
     hit_safety_valve = False
@@ -351,9 +350,19 @@ def fetch_schedule_a(committee_id: str, api_key: str, cycle: int,
         # load-bearing for the direct-donor view.)
         if individuals_only:
             params["is_individual"] = "true"
-        if last_index is not None:
-            params["last_index"] = str(last_index)
-            params["last_contribution_receipt_date"] = str(last_date)
+        # Resume by echoing back whatever keyset cursor FEC handed us last page.
+        # The keys in last_indexes ARE the query-param names FEC expects, and
+        # the SECONDARY key's name depends on the active sort — a date-sorted
+        # pull's cursor is last_contribution_receipt_date, but an amount-sorted
+        # pull's (the capped largest-first "top donors" pull, and the
+        # smallest_first refund pull) is last_contribution_receipt_amount.
+        # Hardcoding the date name here previously sent
+        # last_contribution_receipt_date=None on every amount-sorted page 2,
+        # which FEC correctly rejected with a 422 (silently truncating every
+        # capped pull to page 1) — see Claude_Recommendations.md. Reading the
+        # cursor generically, the way schedule_e's pagination already does,
+        # makes this correct regardless of sort order.
+        params.update({k: str(v) for k, v in cursor.items() if v is not None})
 
         url = f"{FEC_BASE}/schedules/schedule_a/?{urllib.parse.urlencode(params)}"
         code, body = _http_get_with_retry(url)
@@ -414,10 +423,8 @@ def fetch_schedule_a(committee_id: str, api_key: str, cycle: int,
                 seen_sub_ids.add(sid)
             records.append(r)
 
-        last_indexes = pagination.get("last_indexes") or {}
-        last_index = last_indexes.get("last_index")
-        last_date = last_indexes.get("last_contribution_receipt_date")
-        if last_index is None:
+        cursor = pagination.get("last_indexes") or {}
+        if not cursor or cursor.get("last_index") is None:
             break
         # Deliberate cap: we only wanted the biggest donors, and (sorted
         # largest-first) we now have them. This is NOT a truncation — the

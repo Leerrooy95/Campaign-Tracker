@@ -468,6 +468,24 @@ catchable automatically.
   reaches. Both corrections live in `search_fec_candidate`; any new Schedule A
   code path must apply them. A donor total above the federal per-election limit
   is the tell that something regressed.
+- **Never hard-code which key names a keyset-pagination cursor.** FEC's
+  `last_indexes` names its secondary field after whatever the query is sorted
+  by (`last_contribution_receipt_date` when date-sorted,
+  `last_contribution_receipt_amount` when amount-sorted, etc.) — `fetch_schedule_a`
+  hard-coded the date name and broke every amount-sorted pull (the capped
+  "top donors" pull, and the `smallest_first` refund pull once it grows past
+  one page): `last_indexes.get("last_contribution_receipt_date")` silently
+  returned `None`, and `str(None)` sent a literal `last_contribution_receipt_date=None`
+  to FEC, which correctly 422'd and truncated the pull to page 1 — on every
+  candidate, 100% reproducible, never disclosed (see `Claude_Recommendations.md`,
+  the 5-candidate 2026-09-07 audit). Fixed by reading `last_indexes` back
+  generically and re-sending its keys as-is, the same pattern `fetch_schedule_e`
+  already used. `_summarize_direct` now aggregates `truncated`/`truncated_reason`
+  across committees, and the `sched_a` step warns (not oks) when set — mirroring
+  `sched_e`'s existing incomplete check; `composition`'s gate on `sched_a` now
+  accepts a warn (`allow_warn=True`) so a disclosed-but-partial donor pull
+  doesn't halt the record/votes/statements/synthesis stages downstream, same as
+  `sched_e`'s incomplete flag never has. Regression: `tests/test_schedule_a_pagination.py`.
 - **No paid search anywhere.** Brave and similar pay-to-browse APIs are banned by
   preference. Statement gathering uses **self-hosted SearXNG** (`SEARXNG_URL`,
   free, no gatekeeper); `ddgs` is a fallback. The tool calls the operator's own

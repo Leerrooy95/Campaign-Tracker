@@ -5,6 +5,74 @@ follows [Keep a Changelog](https://keepachangelog.com/) conventions: newest
 release first, changes grouped under **Added / Changed / Fixed**, and every
 entry stated as a fact a reader can verify against the code or a run.
 
+## [1.2.1] — 2026-09-07
+
+Driven by `Claude_Recommendations.md` — a 5-candidate live rate-limit/
+completeness audit (Thomas Massie, Ed Gallrein, Steve Womack, Lauren
+Boebert, Mike Collins) run one at a time through the real two-phase
+resolve flow. No 429s occurred (`X-RateLimit-Remaining` never dropped
+below 100/120), but the audit surfaced a 100%-reproducible silent-data-loss
+bug in Schedule A pagination — not a rate-limit problem — plus a gap in how
+a truncated pull gets disclosed.
+
+### Fixed
+
+- **`fec.py` — Schedule A's capped "top donors" pull silently truncated to
+  page 1 on every candidate with more than 100 rows of itemized
+  contributions.** `fetch_schedule_a`'s pagination cursor hard-coded the
+  keyset's secondary field as `last_contribution_receipt_date`, which is
+  only the right field name for a date-sorted query. The capped pull (and
+  the `smallest_first` refund pull, once it grows past one page) sorts by
+  `contribution_receipt_amount`, whose actual cursor field is
+  `last_contribution_receipt_amount` — so the hard-coded lookup returned
+  `None`, `str(None)` produced the literal string `"None"`, and every
+  second-page request sent FEC `last_contribution_receipt_date=None`, which
+  FEC correctly rejected with a 422. Because 422 hits on page 2 (not page
+  1), the pull silently stopped and returned only page 1 — up to 100 raw
+  rows — instead of continuing toward the intended `max_pages=10` (~1,000
+  rows), with no error surfaced anywhere. Confirmed live, one 422 per
+  candidate, in all 5 audit runs. Fixed by reading the cursor generically
+  from `last_indexes` (whatever keys FEC actually returns) and re-sending
+  them as-is — the same pattern `fetch_schedule_a`'s Schedule E sibling
+  (`outside_spending_for_candidate`) already used, which is exactly why
+  Schedule E was unaffected. Hop-2 tracing (uncapped, date-sorted) and the
+  refund pull (capped at 1 page) were also unaffected by the bug itself.
+- **`app.py` — a truncated Schedule A pull never reached the user.**
+  `fetch_schedule_a` already returned `(records, truncated, stop_reason)`
+  correctly, and `RecipientGroup.truncated`/`truncated_reason` were
+  populated and serialized, but `_summarize_direct` dropped both fields
+  before building `track_a_direct`, and the `sched_a` step unconditionally
+  called `s.ok(...)` — unlike the `sched_e` step just below it, which
+  already checks `outspend.incomplete`. So even a *legitimate* future
+  Schedule A failure (a sustained 429/5xx run exhausting retries on a later
+  page — the class of incident described in `fec.py`'s own Talarico
+  $3,911.59-of-$millions docstring note) would still report a clean `ok`.
+  `_summarize_direct` now aggregates `truncated`/`truncated_reason` across
+  a candidate's committees, and the `sched_a` step warns (mirroring
+  `sched_e`'s existing `if outspend.incomplete: s.warn(...)` pattern)
+  instead of always reporting `ok`. The `composition` step's gate on
+  `sched_a` now accepts a warn (`log.require("sched_a", allow_warn=True)`)
+  so a disclosed-but-partial donor pull doesn't halt the
+  record/votes/statements/synthesis stages downstream — composition
+  doesn't consume the capped donor list itself (it re-pulls totals from
+  FEC's own `/totals`), so there was nothing for that gate to actually
+  protect, and `sched_e`'s incomplete flag was never allowed to block
+  anything either.
+- Regression: `tests/test_schedule_a_pagination.py` — an amount-sorted
+  fixture pins the correct cursor key on page 2 (and that a bare
+  `...date=None` is never sent), and an end-to-end run through
+  `app._run_search` confirms a forced later-page failure surfaces as a
+  `warn` on the `sched_a` step, not an `ok`.
+
+### Changed
+
+- Removed `_psycache_/` — a stray committed Python bytecode cache (9 `.pyc`
+  files plus a leftover `template` placeholder) that had no business under
+  version control; tracked in error the same way `User_Runs/` was in 1.2.0.
+  Added `.gitignore` (previously absent from this repo) covering
+  `__pycache__/`, `*.pyc`, and `.synthesis_cache/` so neither can creep
+  back in.
+
 ## [1.2.0] — 2026-08-08
 
 Prepared for open-source release. No changes to the factual pipeline or the
