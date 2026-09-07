@@ -1,0 +1,254 @@
+/* app.css — dark, calm, process-trace feel. The step list is the centerpiece. */
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --line: #262b35;
+  --text: #e6e8ec;
+  --muted: #8b93a1;
+  --accent: #5b9dff;
+  --ok: #4caf7e;
+  --warn: #e0a83b;
+  --fail: #e0594b;
+  --running: #5b9dff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+
+header h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: -0.3px; }
+.sub { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+
+/* search */
+#search-form { display: flex; flex-direction: column; gap: 12px; }
+.main-row { display: flex; gap: 8px; }
+.main-row input {
+  flex: 1; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  padding: 11px 13px; border-radius: 9px; font-size: 15px;
+}
+.main-row input:focus { outline: none; border-color: var(--accent); }
+#go {
+  background: var(--accent); color: #06101f; border: 0; font-weight: 600;
+  padding: 11px 22px; border-radius: 9px; cursor: pointer; font-size: 15px;
+}
+#go:disabled { opacity: 0.5; cursor: default; }
+
+/* optional FEC key — subtle by default, highlighted only when rate-limited */
+.key-block { font-size: 12px; color: var(--muted); transition: all 0.2s; }
+.key-block label { display: block; margin-bottom: 5px; }
+.key-block a { color: var(--accent); }
+.key-block input {
+  width: 100%; background: var(--panel); border: 1px solid var(--line);
+  color: var(--text); padding: 8px 11px; border-radius: 8px; font-size: 13px;
+}
+.key-block input:focus { outline: none; border-color: var(--accent); }
+.key-block.revealed {
+  background: rgba(224,168,59,0.07); border: 1px solid rgba(224,168,59,0.35);
+  border-radius: 10px; padding: 12px 14px; color: var(--warn);
+}
+.key-block.revealed a { color: var(--warn); text-decoration: underline; }
+
+.mode { font-size: 12px; margin: 12px 0 0; }
+.mode.demo { color: var(--warn); }
+.mode.live { color: var(--ok); }
+
+section { margin-top: 28px; }
+section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--muted); margin: 0 0 12px; }
+
+/* the step trace */
+#steps { list-style: none; margin: 0; padding: 0;
+  border-left: 2px solid var(--line); }
+.step { padding: 9px 0 9px 16px; margin-left: 6px; position: relative; }
+.step .row { display: flex; align-items: center; gap: 10px; }
+.step .glyph { font-size: 13px; width: 16px; text-align: center; }
+.step .label { flex: 1; }
+.step .elapsed { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.step .detail { color: var(--muted); font-size: 13px; margin: 4px 0 0 26px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+.step.pending { color: var(--muted); }
+.step.pending .glyph { color: var(--line); }
+.step.running .glyph { color: var(--running); animation: spin 1.1s linear infinite; display: inline-block; }
+.step.ok .glyph { color: var(--ok); }
+.step.warn .glyph { color: var(--warn); }
+.step.warn .label { color: var(--warn); }
+.step.fail .glyph { color: var(--fail); }
+.step.fail .label { color: var(--fail); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* audit */
+#audit { background: rgba(224,168,59,0.07); border: 1px solid rgba(224,168,59,0.3);
+  border-radius: 10px; padding: 14px 16px; }
+#audit h2 { color: var(--warn); }
+#audit-list { margin: 0; padding-left: 18px; font-size: 14px; }
+#audit-list li { margin: 4px 0; }
+
+/* result */
+#result-json {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #cdd3dd;
+}
+
+.error { color: var(--fail); background: rgba(224,89,75,0.08);
+  border: 1px solid rgba(224,89,75,0.3); border-radius: 9px; padding: 11px 14px;
+  font-size: 14px; }
+
+/* plain-language report (translation layer) — rendered markdown */
+#report .report { line-height: 1.6; background: var(--panel, #14161b);
+  padding: 1rem 1.3rem; border-radius: 8px; }
+#report .report h2 { font-size: 1.15rem; margin: 1.2rem 0 .5rem; padding-bottom: .3rem;
+  border-bottom: 1px solid #2a2e37; }
+#report .report h3 { font-size: 1rem; margin: 1rem 0 .4rem; color: #cdd3dc; }
+#report .report h4 { font-size: .92rem; margin: .8rem 0 .3rem; color: #b6bcc6; }
+#report .report p  { margin: .5rem 0; }
+#report .report ul { margin: .4rem 0 .8rem 1.2rem; }
+#report .report li { margin: .25rem 0; }
+#report .report strong { color: #e8ebf0; }
+#report .meta { color: #8a929e; font-size: .82rem; margin: .2rem 0 .6rem; }
+/* Anthropic key field — security note */
+.key-block .key-note { display: block; color: #6fae7f; font-size: .78rem; margin-top: .15rem; }
+
+/* raw JSON collapsed by default — keeps the report primary, kills the 200-page print */
+#raw-toggle { margin-top: 1.5rem; border-top: 1px solid #2a2e37; padding-top: 1rem; }
+#raw-toggle > summary { cursor: pointer; color: #8a929e; font-size: .85rem;
+  list-style: none; user-select: none; }
+#raw-toggle > summary::before { content: "▸ "; }
+#raw-toggle[open] > summary::before { content: "▾ "; }
+#raw-toggle > summary:hover { color: #cdd3dc; }
+#raw-toggle #result-json { margin-top: .6rem; max-height: 60vh; overflow: auto; }
+/* when printing/saving to PDF, never dump the raw JSON — only the report prints */
+@media print { #raw-toggle { display: none !important; } }
+
+/* money composition chart (inline SVG) */
+#money-panel .chart svg { width: 100%; height: auto; max-width: 680px; display: block; }
+#money-panel .chart .grid { stroke: #2a2e37; stroke-width: 1; }
+#money-panel .chart .ax-y { fill: #7d8590; font-size: 11px; }
+#money-panel .chart .ax-x { fill: #cdd3dc; font-size: 12px; font-weight: 600; }
+#money-panel .chart .bar-total { fill: #b6bcc6; font-size: 10.5px; }
+#money-panel .legend { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; margin: .5rem 0 .3rem;
+  font-size: .82rem; color: #cdd3dc; }
+#money-panel .legend span { display: inline-flex; align-items: center; gap: .4rem; }
+#money-panel .legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+#money-panel .chart-note { color: #8a929e; font-size: .78rem; margin: .3rem 0 0; line-height: 1.45; }
+
+/* outside spending (Schedule E) divergent chart */
+#outside-panel .chart svg { width: 100%; height: auto; max-width: 700px; display: block; }
+#outside-panel .axis-c { stroke: #4a5060; stroke-width: 1; }
+#outside-panel .dir { font-size: 11px; font-weight: 600; }
+#outside-panel .dir-op { fill: #c0483f; }
+#outside-panel .dir-sp { fill: #4b9e5f; }
+#outside-panel .sp-name { fill: #cdd3dc; font-size: 11.5px; }
+#outside-panel .sp-name.dark { fill: #e0a03a; }
+#outside-panel .sp-amt { fill: #8a929e; font-size: 10.5px; }
+#outside-panel .chart-note { color: #8a929e; font-size: .8rem; margin: .4rem 0 0; line-height: 1.5; }
+#outside-panel .chart-note strong { color: #cdd3dc; }
+
+/* ── cross-cycle outside-spending trend ───────────────────────────────────── */
+#trend-panel .chart svg { width: 100%; height: auto; max-width: 680px; display: block; }
+#trend-panel .chart .grid { stroke: #2a2e37; stroke-width: 1; }
+#trend-panel .chart .ax-y { fill: #7d8590; font-size: 11px; }
+#trend-panel .chart .ax-x { fill: #cdd3dc; font-size: 12px; font-weight: 600; }
+#trend-panel .chart .bar-cap { fill: #b6bcc6; font-size: 10px; }
+#trend-panel .legend { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; margin: .5rem 0 .3rem;
+  font-size: .82rem; color: #cdd3dc; }
+#trend-panel .legend span { display: inline-flex; align-items: center; gap: .4rem; }
+#trend-panel .legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+#trend-panel .chart-note { color: #8a929e; font-size: .78rem; margin: .3rem 0 0; line-height: 1.45; }
+
+/* ── timeline swimlane (side-by-side as a picture) ────────────────────────── */
+.chart-scroll { overflow-x: auto; }
+#timeline-chart svg { display: block; height: auto; }
+
+/* PRINT / PDF — the swimlane is fixed-pixel inside a horizontal scroller so
+   long histories scroll instead of shrinking dots into invisibility. That is
+   right on screen and WRONG on paper: `overflow-x: auto` clips at the page
+   edge, and because bands run oldest-to-newest the clipped-off part is the
+   NEWEST data. In the Run-19 PDF that meant the Money lane rendered completely
+   empty — every money event is 2025-2026 and sat off-canvas — which reads as a
+   finding ("no outside money in this race") rather than a rendering artifact.
+   In print, let the SVG scale to the page: viewBox does the work, nothing is
+   dropped, and the caption still carries the counts. */
+@media print {
+  .chart-scroll { overflow: visible !important; }
+  #timeline-chart svg { width: 100% !important; height: auto !important; }
+}
+#timeline-panel .lane-label { fill: #cdd3dc; font-size: 11px; font-weight: 600; }
+#timeline-panel .lane-line { stroke: #262b35; stroke-width: 1; }
+#timeline-panel .band-label { fill: #7d8590; font-size: 9.5px; }
+#timeline-panel .band-gap { fill: #5a6170; font-size: 11px; }
+#timeline-panel .more { fill: #8a929e; font-size: 9px; }
+#timeline-panel .legend { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; margin: .5rem 0 .3rem;
+  font-size: .82rem; color: #cdd3dc; }
+#timeline-panel .legend span { display: inline-flex; align-items: center; gap: .4rem; }
+#timeline-panel .legend i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+#timeline-panel .legend i.diamond { border-radius: 0; transform: rotate(45deg); width: 9px; height: 9px; }
+#timeline-panel .chart-note { color: #8a929e; font-size: .78rem; margin: .4rem 0 0; line-height: 1.45; }
+
+/* ── roll-call votes ledger (Track B) ─────────────────────────────────────── */
+.votes-list { display: flex; flex-direction: column; gap: 8px; }
+.vote-row {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 10px 13px;
+}
+.vote-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vote-date { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.vote-pos {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  border-radius: 6px; padding: 2px 8px; border: 1px solid var(--line);
+}
+.vote-pos.yea { color: var(--ok); border-color: rgba(76,175,126,0.5); background: rgba(76,175,126,0.1); }
+.vote-pos.nay { color: var(--fail); border-color: rgba(224,89,75,0.5); background: rgba(224,89,75,0.1); }
+.vote-pos.oth { color: var(--muted); }
+.vote-role {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.3px;
+  color: #8a6fd1; border: 1px solid rgba(138,111,209,0.45);
+  background: rgba(138,111,209,0.1); border-radius: 6px; padding: 2px 8px;
+}
+.vote-cite { color: var(--accent); font-size: 13px; text-decoration: none; }
+.vote-cite:hover { text-decoration: underline; }
+.vote-title { color: var(--text); font-size: 14px; margin-top: 4px; }
+.vote-meta { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+#votes-panel .chart-note { color: #8a929e; font-size: .78rem; margin: .5rem 0 0; line-height: 1.45; }
+
+/* ── data export card (CSV per table + Download-all ZIP) ──────────────────── */
+.export-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.export-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 10px 13px;
+}
+.export-label { color: var(--text); font-size: 14px; }
+.export-dl, #export-all {
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: border-color 0.15s, background 0.15s;
+}
+.export-dl:hover, #export-all:hover { border-color: var(--accent); background: rgba(91,157,255,0.08); }
+.export-actions { margin-top: 12px; }
+#export-all {
+  background: var(--accent); color: #06101f; border-color: var(--accent);
+  padding: 9px 18px; font-size: 14px;
+}
+#export-all:hover { background: #6fa9ff; }
+
+/* ── "Did You Mean?" candidate picker ─────────────────────────────────────── */
+.picker-note { color: var(--muted); font-size: 14px; margin: 2px 0 12px; }
+.picker-list { display: flex; flex-direction: column; gap: 8px; }
+.picker-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 15px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.picker-row:hover { border-color: var(--accent); background: rgba(91,157,255,0.08); }
+.picker-name { color: var(--text); font-size: 15px; font-weight: 600; }
+.picker-meta { color: var(--muted); font-size: 13px; }
