@@ -16,7 +16,7 @@
 #     documented (run.sh deliberately does not carry its own copy — it just
 #     points here). The placeholder string here MUST match the sed target in
 #     the README exactly, or the rotation step silently no-ops and every
-#     clone ships the same known secret_key (Security_Recommendations.md
+#     clone ships the same known secret_key (SECURITY.md
 #     HIGH finding, fixed 2026-09-07 — this file's shipped value, this
 #     comment's claimed placeholder, and the sed targets in two separate
 #     copies of the setup instructions had drifted to three DIFFERENT

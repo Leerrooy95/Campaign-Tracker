@@ -190,6 +190,26 @@ check("composition null traceable/dark survives to row",
   byKey.composition.rows[0][9] === null && byKey.composition.rows[0][10] === null);
 check("file prefix from name + cycle", CT.filePrefix(result) === "ossoff_t_jonathan_2026");
 
+// ── demo runs must stay identifiable after export ─────────────────────────
+// A demo export used to be indistinguishable from a real one once the files
+// were on disk: no run-level flag anywhere in the JSON, and the composition
+// table was silently DROPPED when its rows carried "_demo" (a missing table,
+// not a disclosed one). Now the run flag rides in result.demo, the filename
+// says so, and the table exports like any other.
+const demoResult = { ...result, demo: true };
+check("demo run gets a demo_ filename prefix",
+  CT.filePrefix(demoResult) === "demo_ossoff_t_jonathan_2026");
+check("a real run's prefix is unchanged (no stray prefix)",
+  CT.filePrefix(result) === "ossoff_t_jonathan_2026");
+const demoTables = CT.buildTables({
+  demo: true,
+  track_a_composition: [{ cycle: 2026, receipts: 10e6, individual_itemized: 7.4e6,
+                          _demo: true }],
+});
+check("demo composition rows are exported, not silently dropped",
+  demoTables.some(t => t.key === "composition") &&
+  demoTables.find(t => t.key === "composition").rows.length === 1);
+
 // ── build the ZIP and write everything out for the Python verifier ────────
 const files = tables.map(t => ({
   name: `${CT.filePrefix(result)}_${t.key}.csv`,

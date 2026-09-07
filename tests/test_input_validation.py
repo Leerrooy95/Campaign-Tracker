@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 2 HIGH findings:
+"""Regression test for the SECURITY.md Phase 2 HIGH findings:
 `candidate_id` and `state` reached fec.py / congress.py's unencoded URL
 interpolation with zero format validation.
 

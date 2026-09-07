@@ -1,4 +1,4 @@
-"""Regression test for two Security_Recommendations.md Phase 3 MEDIUM
+"""Regression test for two SECURITY.md Phase 3 MEDIUM
 findings in app.py's rate limiting:
 
   1. flask-limiter degraded to a no-op decorator (returns the function

@@ -10,7 +10,9 @@ itself, lines them up on one dated timeline, and shows its work — every
 dollar traces to an FEC record ID, every bill and vote to a congress.gov/
 clerk citation you can click and verify yourself.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for what changed release to release.
+See [`CHANGELOG.md`](CHANGELOG.md) for what changed release to release, and
+[`SECURITY.md`](SECURITY.md) for the deployment posture and how to report a
+vulnerability.
 
 ---
 
@@ -227,7 +229,12 @@ python3 app.py                     # http://localhost:5000
 With no keys set, searches run in **demo mode** on synthetic fixtures — watch the
 eight steps light up, the Schedule-E warn drop into the audit box, and the factual
 result print (the synthesis step shows as skipped without a key).
-No keys, no network.
+No keys, and no network calls from any stage — that holds even if you already
+have `SEARXNG_URL` set for the statements track. A demo run is labeled as one
+everywhere it can be read: the banner on the page, `demo: true` in the result
+JSON, a `_demo` flag on every synthetic track, and a `demo_` prefix on every
+exported CSV/ZIP filename, so simulated data can't be mistaken for real data
+later.
 
 For **live** data, the easiest path is the included **`run.sh`** — set your keys
 in a `.env` file once, then launch:
@@ -246,7 +253,7 @@ built-in authentication, authorization, or TLS.** That's the right default
 for local use. If you want it reachable from another machine, set
 `HOST=0.0.0.0` (or a LAN address) explicitly — you'll get a printed warning
 — and put a reverse proxy doing TLS + auth in front of it first. See
-`Security_Recommendations.md` before exposing this beyond your own machine.
+[`SECURITY.md`](SECURITY.md) before exposing this beyond your own machine.
 If (and only if) that reverse proxy is real, also set `BEHIND_PROXY=1` so
 rate limiting keys on the real client IP instead of the proxy's — without a
 real proxy in front, leave this unset, or any client can spoof its IP via
@@ -327,6 +334,7 @@ picture with rationale:
 | Server, job orchestration, frontend | `app.py`, `templates/`, `static/` |
 | Visible-process spine | `steps.py` |
 | Regression tests | `tests/` |
+| Project docs | `README.md`, [`CLAUDE.md`](CLAUDE.md), [`SECURITY.md`](SECURITY.md), [`CHANGELOG.md`](CHANGELOG.md) |
 
 **Endpoints:**
 
@@ -335,8 +343,8 @@ picture with rationale:
 | `/` | GET | The single-page UI |
 | `/candidates` | POST | `{name}` → ranked "Did You Mean?" shortlist (fast, synchronous) so the exact office/cycle is confirmed before the heavy run |
 | `/search` | POST | `{name, anthropic_key?, candidate_id?…}` → `{job_id, demo}`; spawns the worker (key used transiently, never stored) |
-| `/status/<job_id>` | GET | Live step log + result; the frontend polls this |
-| `/health` | GET | Liveness + whether a FEC key is configured |
+| `/status/<job_id>` | GET | Live step log + result (+ `demo`); the frontend polls this |
+| `/health` | GET | Liveness only — `{"ok": true}`, deliberately nothing about configured keys |
 
 ---
 
@@ -361,6 +369,10 @@ total. So the thing you watched happen is provably the thing that ran.
   categorically different sizes; they're kept separate.
 - **Disclosed incompleteness.** Pagination shortfalls and skipped stages are
   surfaced, never hidden.
+- **Disclosures describe what ran.** Every step's message is derived from what
+  the stage actually returned, not from what the code path meant to do — so
+  the log can't tell you "offline fixtures" while a live search is happening.
+  Simulated runs stay labeled all the way into the exported files.
 - **The report is checked, not trusted.** The one interpretive step — the
   plain-language report — is reconciled against the source JSON by a
   deterministic guard (`reconcile.py`) before it's shown. A spender put on the

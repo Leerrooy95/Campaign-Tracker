@@ -306,7 +306,13 @@ function showMode(demo) {
   // Only surface a banner in demo mode (dev, no shared key). In live mode the
   // shared key is used silently — users shouldn't have to think about keys.
   if (!demo) { m.hidden = true; return; }
-  m.textContent = "demo mode — simulated data (no FEC key configured)";
+  // Says what the run IS, not why it happened: demo is normally "no FEC key
+  // configured", but it can also be asked for explicitly through the API on a
+  // keyed deployment, and the banner must be true in both cases. The run is
+  // labeled in the data too (result.demo, each track's _demo, demo_ export
+  // filenames) so the disclosure survives leaving the page.
+  m.textContent = "demo mode — simulated data from offline fixtures, no live "
+                + "sources contacted; exports are labeled demo_*";
   m.className = "mode demo";
   m.hidden = false;
 }

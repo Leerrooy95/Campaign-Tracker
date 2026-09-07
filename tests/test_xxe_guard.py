@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 4 LOW finding:
+"""Regression test for the SECURITY.md Phase 4 LOW finding:
 votes.py's three `xml.etree.ElementTree.fromstring()` calls (Senate LIS vote
 menus and per-vote XML) were documented-vulnerable to entity-expansion
 ("billion laughs") and quadratic-blowup DoS — stdlib ElementTree happily

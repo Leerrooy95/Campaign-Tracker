@@ -1,4 +1,4 @@
-"""Regression test for two Security_Recommendations.md Phase 4 LOW findings:
+"""Regression test for two SECURITY.md Phase 4 LOW findings:
 
   1. `/health` unconditionally returned `{"has_fec_key": bool(...)}` — a
      reconnaissance signal, for an unauthenticated caller, distinguishing a

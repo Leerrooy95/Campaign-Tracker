@@ -354,8 +354,9 @@ def fetch_schedule_a(committee_id: str, api_key: str, cycle: int,
         # Hardcoding the date name here previously sent
         # last_contribution_receipt_date=None on every amount-sorted page 2,
         # which FEC correctly rejected with a 422 (silently truncating every
-        # capped pull to page 1) — see Claude_Recommendations.md. Reading the
-        # cursor generically, the way schedule_e's pagination already does,
+        # capped pull to page 1), reproduced on all five candidates of the
+        # 2026-09-07 live audit. Reading the cursor generically, the way
+        # schedule_e's pagination already does,
         # makes this correct regardless of sort order.
         params.update({k: str(v) for k, v in cursor.items() if v is not None})
 

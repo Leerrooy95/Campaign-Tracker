@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 3 MEDIUM
+"""Regression test for the SECURITY.md Phase 3 MEDIUM
 finding: every POST /search spawned an unbounded `threading.Thread` with no
 concurrency ceiling, no queue, and no per-client job cap — resource
 exhaustion (thread + memory pressure) from concurrent job submission.

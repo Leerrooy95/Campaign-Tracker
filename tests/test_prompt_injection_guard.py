@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 3 MEDIUM
+"""Regression test for the SECURITY.md Phase 3 MEDIUM
 finding: statement excerpts sourced from arbitrary third-party web pages
 were placed into the synthesis model prompt with no delimiting, provenance
 marking, or instruction-injection defense — SYSTEM_PROMPT constrained the

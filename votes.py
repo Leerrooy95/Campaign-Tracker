@@ -43,7 +43,7 @@ from defusedxml.ElementTree import fromstring as _parse_xml
 import congress as _congress
 from congress import CongressAPIError, _money_match   # SAME whole-word regex tagging
 
-# Security_Recommendations.md LOW: stdlib ElementTree.fromstring is
+# SECURITY.md LOW: stdlib ElementTree.fromstring is
 # documented-vulnerable to entity-expansion ("billion laughs") and quadratic
 # blowup DoS (not XXE/file disclosure — ET never resolves external entities
 # or fetches DTDs). All THREE parse sites below (Senate vote-menu XML,

@@ -1,5 +1,5 @@
 /* Node test for static/app.js's citation-link scheme allowlist
- * (Security_Recommendations.md Phase 4 LOW finding).
+ * (SECURITY.md Phase 4 LOW finding).
  *
  * BUG (latent, not currently exploitable): the roll-call vote citation link
  * was built as `href="${escapeHtml(v.url)}"` — escapeHtml quotes correctly

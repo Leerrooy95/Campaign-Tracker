@@ -91,6 +91,14 @@ class StatementSet:
     searched_at: str = ""                              # ISO-8601 UTC, run start
 
 
+# Explicit "run offline, never touch the network" sentinel for
+# collect_statements's `searxng_url`. Demo mode passes this instead of a bare
+# "" so the intent is readable at the call site and can never be mistaken for
+# "unset, go look at the environment" — the exact confusion that let a demo run
+# make live searches.
+FORCE_OFFLINE = ""
+
+
 def collect_statements(candidate: str, searxng_url: Optional[str] = None,
                        per_query: int = 8, office: Optional[str] = None) -> StatementSet:
     """Gather a candidate's public statements on money/influence. Returns a
@@ -100,9 +108,23 @@ def collect_statements(candidate: str, searxng_url: Optional[str] = None,
     domain and name cues (see build_candidate_context) so 'their own voice' is
     detected for anyone, not just the hardcoded default.
 
-    searxng_url: base URL of a SearXNG instance (or SEARXNG_URL env). If absent,
-    returns labeled offline fixtures so the pipeline still runs."""
-    base = (searxng_url or os.getenv("SEARXNG_URL", "")).strip()
+    searxng_url decides fixtures vs live search, and the three cases are
+    DISTINCT on purpose (see FORCE_OFFLINE above):
+      - None (the default)  → consult SEARXNG_URL in the environment.
+      - FORCE_OFFLINE ("")  → offline fixtures, no network, whatever the
+                              environment says. This is what demo mode passes.
+      - any other string    → that instance, live.
+
+    The old form was `base = (searxng_url or os.getenv("SEARXNG_URL", ""))`,
+    which is Python's falsy-string fallthrough: a caller passing "" to force
+    fixtures fell through to the environment instead, so a demo run in a shell
+    with SEARXNG_URL set ran a LIVE search and mixed one real, network-derived
+    track into an otherwise synthetic result (reproduced live, 2026-09-07
+    regression audit). Keep the three cases separate."""
+    if searxng_url is None:
+        base = os.getenv("SEARXNG_URL", "").strip()
+    else:
+        base = searxng_url.strip()
     if not base:
         return _offline(candidate)
 
@@ -190,7 +212,7 @@ def collect_statements(candidate: str, searxng_url: Optional[str] = None,
 # `base_url` is operator-controlled today (app.py reads SEARXNG_URL from the
 # environment; it's never a request-scoped or per-user setting), so this is
 # NOT a live SSRF sink the way the page-fetch tier below was — noted here as
-# a design-boundary risk only (Security_Recommendations.md), because the
+# a design-boundary risk only (SECURITY.md), because the
 # `_search` seam is explicitly documented as pluggable. If `base_url` (or
 # any future search backend's target) EVER becomes reachable from request
 # data, validate it through `_is_safe_url` first, the same guard that closed
@@ -477,7 +499,7 @@ def _http_get_once(url: str) -> tuple[Optional[str], Optional[str]]:
             # ever slices it, so the documented 256 KB read bound didn't hold
             # on this (primary, production) transport — a large or slow-drip
             # page was read fully into memory regardless of the cap
-            # (Security_Recommendations.md MEDIUM; the urllib fallback below
+            # (SECURITY.md MEDIUM; the urllib fallback below
             # was already correct via resp.read(n)). Reading in bounded
             # chunks and breaking once the cap is reached, then closing the
             # connection, is what actually enforces the limit at the socket.

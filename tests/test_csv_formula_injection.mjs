@@ -1,5 +1,5 @@
 /* Node test for static/export.js's CSV/DDE formula-injection guard
- * (Security_Recommendations.md Phase 3 MEDIUM finding).
+ * (SECURITY.md Phase 3 MEDIUM finding).
  *
  * BUG: csvCell() implemented RFC-4180 quoting correctly and nothing else.
  * Cell content includes statement excerpts harvested from arbitrary indexed

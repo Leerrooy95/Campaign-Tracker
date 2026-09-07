@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 3 MEDIUM
+"""Regression test for the SECURITY.md Phase 3 MEDIUM
 finding: only X-Content-Type-Options and X-Frame-Options were set — no
 Content-Security-Policy, Referrer-Policy, Permissions-Policy, or HSTS, and
 templates/index.html had no CSP meta tag either. The audit called this a

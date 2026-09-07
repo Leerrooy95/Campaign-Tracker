@@ -19,7 +19,7 @@
   // quotes. Titles and statement excerpts routinely contain all four, so this
   // is the one part that actually has to be correct.
   //
-  // CSV/DDE FORMULA-INJECTION GUARD (Security_Recommendations.md MEDIUM).
+  // CSV/DDE FORMULA-INJECTION GUARD (SECURITY.md MEDIUM).
   // Statement titles/excerpts come from arbitrary indexed web pages
   // (statements.py) and committee/employer/occupation are FEC free-text
   // fields — none of that is sanitized upstream. A crafted value starting
@@ -111,9 +111,13 @@
                                   t.is_notice, t.notice_only, t.filing_form, t.sub_id]),
     });
 
-    // Funding composition (per cycle).
+    // Funding composition (per cycle). Demo rows are exported like any other
+    // (they used to be silently dropped when marked "_demo", which left a demo
+    // export quietly missing a table): a synthetic run is disclosed by the
+    // "demo_" filename prefix, result.demo, and each row's own _demo flag —
+    // never by omitting data from the export.
     const comp = result.track_a_composition || [];
-    if (comp.length && !comp[0]._demo) tables.push({
+    if (comp.length) tables.push({
       key: "composition", label: "Funding composition by cycle",
       headers: ["cycle", "receipts", "individual_itemized", "individual_unitemized",
                 "pac_contributions", "large_share", "small_share",
@@ -192,13 +196,18 @@
     return tables;
   }
 
+  // Filenames carry the run's own provenance: a demo export is named
+  // "demo_<candidate>_<cycle>_<table>.csv" so synthetic data is identifiable
+  // from the file listing alone, months later, without opening anything. The
+  // same claim rides inside the data (result.demo, each row's _demo).
   function filePrefix(result) {
     result = result || {};
     const name = (result.candidate_name || result.candidate_id || "candidate");
     const cyc = (result.track_a_outside && result.track_a_outside.cycle) || "";
     let p = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     if (cyc) p += "_" + cyc;
-    return p || "campaign_tracker";
+    p = p || "campaign_tracker";
+    return result.demo ? "demo_" + p : p;
   }
 
   // ── bytes helpers ───────────────────────────────────────────────────────
