@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?><vote_summary>
+  <congress>119</congress>
+  <session>1</session>
+  <congress_year>2025</congress_year>
+  <votes>
+    <vote>
+      <vote_number>00612</vote_number>
+      <vote_date>04-Dec</vote_date>
+      <issue>S. 512</issue>
+      <question>On the Cloture Motion
+         </question>
+      <result>Rejected</result>
+      <vote_tally>
+        <yeas>52</yeas>
+        <nays>48</nays>
+      </vote_tally>
+      <title>Motion to Invoke Cloture: DISCLOSE Act of 2025</title>
+    </vote>
+    <vote>
+      <vote_number>00500</vote_number>
+      <vote_date>18-Sep</vote_date>
+      <issue>PN373</issue>
+      <question>On the Nomination
+         </question>
+      <result>Confirmed</result>
+      <vote_tally>
+        <yeas>51</yeas>
+        <nays>42</nays>
+      </vote_tally>
+      <title>Confirmation: Sara Bailey to be Director of National Drug Control Policy</title>
+    </vote>
+    <vote>
+      <vote_number>00450</vote_number>
+      <vote_date>21-Jul</vote_date>
+      <en_bloc>
+        <matter>
+          <issue>PN416-9</issue>
+          <question>On the Nomination</question>
+          <result>Confirmed</result>
+        </matter>
+        <matter>
+          <issue>PN141-12</issue>
+          <question>On the Nomination</question>
+          <result>Confirmed</result>
+        </matter>
+      </en_bloc>
+    </vote>
+    <vote>
+      <vote_number>00300</vote_number>
+      <vote_date>11-Jun</vote_date>
+      <issue>S. 2113</issue>
+      <question>On Passage of the Bill
+         </question>
+      <result>Passed</result>
+      <vote_tally>
+        <yeas>68</yeas>
+        <nays>30</nays>
+      </vote_tally>
+      <title>Ban Corporate PACs Act</title>
+    </vote>
+    <vote>
+      <vote_number>00250</vote_number>
+      <vote_date>03-May</vote_date>
+      <issue>S. 900</issue>
+      <question>On Passage of the Bill
+         </question>
+      <result>Passed</result>
+      <vote_tally>
+        <yeas>88</yeas>
+        <nays>10</nays>
+      </vote_tally>
+      <title>Living Donor Protection Act</title>
+    </vote>
+  </votes>
+</vote_summary>
