@@ -39,6 +39,25 @@ You should see JSON (a `{"query": "test", ...` payload), not an HTML page or
 a 403. If you get a 403, `settings.yml` likely isn't being picked up — check
 `docker compose logs` for a mount error.
 
+**If statements.py keeps returning 0 statements, check `unresponsive_engines`
+in that same response** (pipe through `python3 -m json.tool` instead of
+`head -c 200` to see it):
+
+```bash
+curl -s "http://localhost:8080/search?q=test&format=json" | python3 -m json.tool
+```
+
+A general-search engine that's being blocked shows up here as
+`["<engine>", "too many requests"]` (or a timeout). Brave's free scraper
+engine (`brave` — not the paid Brave Search API, which this project never
+uses) does this reliably even from a single low-volume self-hosted instance,
+so `settings.yml` disables it by default; that's what the `engines:` block
+at the bottom of the file is for. If another engine starts showing up the
+same way, disable it the same way — add a `- name: <engine>` /
+`disabled: true` pair to that block rather than touching anything else, since
+`use_default_settings: true` means every other engine keeps its shipped
+default.
+
 ## Stop / reset
 
 ```bash

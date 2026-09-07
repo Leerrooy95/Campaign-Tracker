@@ -518,19 +518,39 @@ catchable automatically.
   accepts a warn (`allow_warn=True`) so a disclosed-but-partial donor pull
   doesn't halt the record/votes/statements/synthesis stages downstream, same as
   `sched_e`'s incomplete flag never has. Regression: `tests/test_schedule_a_pagination.py`.
-- **No paid search anywhere.** Brave and similar pay-to-browse APIs are banned by
-  preference. Statement gathering uses **self-hosted SearXNG** (`SEARXNG_URL`,
-  free, no gatekeeper); `ddgs` is a fallback. The tool calls the operator's own
-  SearXNG instance — keep it locked down (Cloudflare Access / Tailscale) if it's
-  cloud-hosted, and enable `json` in its `settings.yml`. A minimal, ready-to-run
-  compose file lives at `docker/searxng/` — it's deliberately a single-container
-  setup (no reverse proxy, no Valkey, bound to `127.0.0.1`) because this instance
-  answers only this project's own JSON queries, not public traffic; see
-  `docker/searxng/README.md`. If you instead run the official multi-container
-  `searxng-docker` (reverse proxy + Valkey, needed once you turn the limiter
-  back on for a public instance), its service is named `core`/`searxng-core`,
-  not `searxng` — the in-container hostname differs by which compose file you
-  used.
+- **No paid search anywhere.** Brave Search's official **paid** API and similar
+  pay-to-browse services are banned by preference. Statement gathering uses
+  **self-hosted SearXNG** (`SEARXNG_URL`, free, no gatekeeper). The tool calls
+  the operator's own SearXNG instance — keep it locked down (Cloudflare Access
+  / Tailscale) if it's cloud-hosted, and enable `json` in its `settings.yml`. A
+  minimal, ready-to-run compose file lives at `docker/searxng/` — it's
+  deliberately a single-container setup (no reverse proxy, no Valkey, bound to
+  `127.0.0.1`) because this instance answers only this project's own JSON
+  queries, not public traffic; see `docker/searxng/README.md`. If you instead
+  run the official multi-container `searxng-docker` (reverse proxy + Valkey,
+  needed once you turn the limiter back on for a public instance), its service
+  is named `core`/`searxng-core`, not `searxng` — the in-container hostname
+  differs by which compose file you used.
+- **SearXNG's FREE `brave` engine (an HTML scraper, unrelated to the paid API
+  above) is disabled in `docker/searxng/settings.yml` (2026-09-07 fix) —
+  it blocks fast.** A real run returned "0 statements gathered" on a real
+  candidate across several consecutive searches; curling
+  `/search?q=test&format=json` and reading `unresponsive_engines` showed
+  `["brave", "too many requests"]` — Brave's anti-bot defense trips even
+  against a single low-volume self-hosted instance issuing statements.py's
+  ~10 sequential per-candidate queries. `engines: [{name: brave, disabled:
+  true}]` under `use_default_settings: true` merges by engine `name` (verified
+  against SearXNG's own `settings_loader.py`), so every other engine keeps its
+  shipped default — the same "override one field, everything else inherits"
+  pattern this file uses for `search.formats` above. `disabled: true` at the
+  settings level (not a per-browser cookie) governs the DEFAULT engine set a
+  cookie-less request gets, so it applies to statements.py's JSON calls the
+  same as a browser hitting the UI. If `duckduckgo` or `startpage` — the other
+  two engines this file already flagged as occasionally rate-limited together
+  with brave during the 2026-09-07 audit — start showing the same
+  `unresponsive_engines` pattern, disable them the same way (see
+  `docker/searxng/README.md`'s diagnostic section) rather than reaching for a
+  different engine set or a paid fallback.
 - **`x or os.getenv(...)` is a trap wherever `""` is a meaningful value.**
   An empty string is falsy, so that idiom silently turns "the caller
   explicitly asked for nothing" into "go look at the environment." That is

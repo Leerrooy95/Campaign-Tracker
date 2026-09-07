@@ -36,6 +36,31 @@
 # traffic to rate-limit. Turning the limiter on would require a Valkey/Redis
 # container this minimal compose file doesn't run, and would start blocking
 # statements.py's own queries.
+#
+#   - engines: disabling `brave` (2026-09-07 fix, real-run finding). This is
+#     the free SearXNG "brave" engine — an HTML SCRAPER of brave.com/search,
+#     not the paid Brave Search API (that's the separate `braveapi` engine,
+#     inactive by default; CLAUDE.md's "no paid search" rule is about that
+#     one, unrelated to this fix). A live run against this project's own
+#     instance returned "0 statements gathered" on a real candidate for
+#     several searches in a row; manually curling
+#     `/search?q=test&format=json` and reading the response's
+#     "unresponsive_engines" key showed `["brave", "too many requests"]` —
+#     Brave's anti-bot defense blocks this scraper fast, even from a single
+#     low-volume self-hosted instance issuing statements.py's ~10
+#     sequential queries per candidate search. A blocked engine doesn't
+#     silently drop out cleanly; it can eat the per-engine timeout budget on
+#     every query and degrade the whole search, which is a worse failure
+#     mode than one fewer engine's worth of results. Disabling it here is a
+#     server-side settings.yml default (not a per-browser cookie), so it
+#     applies to statements.py's cookie-less JSON requests the same as to a
+#     browser hitting the UI. If another general-category engine (e.g.
+#     duckduckgo, startpage — both mentioned in CLAUDE.md as occasionally
+#     rate-limited together with brave) starts showing the same pattern in
+#     "unresponsive_engines", add it the same way below rather than
+#     replacing the whole engines list — `use_default_settings: true` means
+#     any engine NOT listed here still gets the shipped defaults, and only
+#     the field(s) you set on a listed engine (by `name`) are overridden.
 use_default_settings: true
 
 server:
@@ -45,3 +70,7 @@ search:
   formats:
     - html
     - json
+
+engines:
+  - name: brave
+    disabled: true
