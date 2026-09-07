@@ -31,6 +31,7 @@ RUNTIME MODES:
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import uuid
@@ -63,6 +64,18 @@ except ImportError:  # pragma: no cover
 JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
 _JOB_TTL = 1800  # seconds to keep a finished job around for polling/export
+
+# Both fields below are interpolated UNENCODED into upstream API paths
+# (fec.py's candidate_id -> /candidate/{id}/totals/, congress.py's state ->
+# /member/{state}) once the "resolve" step trusts them. They arrive from the
+# client's POST body via the "Did You Mean?" picker (static/app.js sends back
+# exactly what /candidates returned), so they're never attacker-authored in
+# the intended flow — but the route can't assume that; enforce the real
+# upstream grammars here, at the boundary, before either value goes anywhere
+# near fec.py or congress.py. A candidate id or state that doesn't match is a
+# malformed request, not a valid-but-obscure one, so a 400 is correct.
+_CANDIDATE_ID_RE = re.compile(r"^[HSP][0-9A-Z]{8}$")   # FEC's own candidate_id grammar
+_STATE_RE = re.compile(r"^[A-Z]{2}$")                  # USPS state/territory code
 
 
 def _new_job() -> str:
@@ -657,6 +670,15 @@ def create_app() -> Flask:
         office = (data.get("office") or "").strip()
         state = (data.get("state") or "").strip()
 
+        # Reject before either value reaches fec.py/congress.py's unencoded
+        # URL interpolation (Security_Recommendations.md, Phase 2). Empty is
+        # fine (both are optional — a bare-name search never sets them); a
+        # non-empty value that doesn't match the real upstream grammar is not.
+        if candidate_id and not _CANDIDATE_ID_RE.match(candidate_id):
+            return jsonify({"error": "invalid candidate_id"}), 400
+        if state and not _STATE_RE.match(state):
+            return jsonify({"error": "invalid state"}), 400
+
         job_id = _new_job()
         threading.Thread(target=_run_search,
                          args=(job_id, name, fec_key, demo, anthropic_key,
@@ -702,4 +724,18 @@ if __name__ == "__main__":
     # open-source tool should default to for everyone who clones it. Opt in
     # for local development with FLASK_DEBUG=1.
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=port, threaded=True, debug=debug)
+    # HOST defaults to loopback-only: there is no authentication, authorization,
+    # or TLS anywhere in this app (Security_Recommendations.md HIGH finding),
+    # so the default a bare `python3 app.py` / `./run.sh` gives an open-source
+    # cloner must be the safe one — reachable only from the machine it runs
+    # on. Binding wider (a LAN, a container's 0.0.0.0, a public host) is an
+    # explicit opt-in via HOST, not the default, and prints a loud warning so
+    # it's never done silently.
+    host = os.getenv("HOST", "127.0.0.1")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"  WARNING: HOST={host!r} — this app has NO built-in authentication,")
+        print(f"  authorization, or TLS. Anyone who can reach this address can run jobs")
+        print(f"  on your FEC/Congress quota and, if you paste one in, intercept your")
+        print(f"  Anthropic key in transit. Put a reverse proxy (TLS + auth) in front")
+        print(f"  before binding beyond your own machine — see Security_Recommendations.md.\n")
+    app.run(host=host, port=port, threaded=True, debug=debug)

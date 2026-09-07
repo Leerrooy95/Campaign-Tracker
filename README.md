@@ -230,13 +230,23 @@ result print (the synthesis step shows as skipped without a key).
 No keys, no network.
 
 For **live** data, the easiest path is the included **`run.sh`** — set your keys
-in it once, then launch:
+in a `.env` file once, then launch:
 
 ```bash
-# edit run.sh: paste FEC_API_KEY + CONGRESS_API_KEY, set SEARXNG_URL
+cp .env.example .env               # then edit .env: paste FEC_API_KEY + CONGRESS_API_KEY, set SEARXNG_URL
 # (Anthropic key is UI-only now — paste it into the web field per-request)
-bash run.sh                        # exports the keys, then runs the app
+bash run.sh                        # sources .env, then runs the app
 ```
+
+`.env` is gitignored — real keys never end up in `run.sh` itself or in git
+history.
+
+**The app binds to `127.0.0.1` (this machine only) by default and has no
+built-in authentication, authorization, or TLS.** That's the right default
+for local use. If you want it reachable from another machine, set
+`HOST=0.0.0.0` (or a LAN address) explicitly — you'll get a printed warning
+— and put a reverse proxy doing TLS + auth in front of it first. See
+`Security_Recommendations.md` before exposing this beyond your own machine.
 
 Or set them by hand:
 

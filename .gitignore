@@ -8,9 +8,10 @@ __pycache__/
 # synthesis.py's per-candidate report cache (generated, not source).
 .synthesis_cache/
 
-# Local environment / secrets. The FEC/Congress keys go in run.sh (not
-# committed as filled-in) or the shell environment; the Anthropic key is
-# UI-only and never touches disk — see CLAUDE.md.
+# Local environment / secrets. The FEC/Congress/SearXNG values go in .env
+# (copy .env.example -> .env; run.sh sources it automatically) or the shell
+# environment; the Anthropic key is UI-only and never touches disk — see
+# CLAUDE.md and Security_Recommendations.md.
 .env
 venv/
 .venv/

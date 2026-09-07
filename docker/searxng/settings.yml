@@ -10,9 +10,19 @@
 #     against a default install that returns a 403. Adding "json" here is the
 #     one thing this project actually requires.
 #
-#   - server.secret_key: the value below is a placeholder ("e2bckiiubpiubvuib")
+#   - server.secret_key: the value below is a placeholder ("ultrasecretkey")
 #     that setup replaces in-place with a real random value via `sed` — see
-#     docker/searxng/README.md. NOTE: Docker Compose's ${VAR} interpolation
+#     docker/searxng/README.md, the ONE place this setup command is
+#     documented (run.sh deliberately does not carry its own copy — it just
+#     points here). The placeholder string here MUST match the sed target in
+#     the README exactly, or the rotation step silently no-ops and every
+#     clone ships the same known secret_key (Security_Recommendations.md
+#     HIGH finding, fixed 2026-09-07 — this file's shipped value, this
+#     comment's claimed placeholder, and the sed targets in two separate
+#     copies of the setup instructions had drifted to three DIFFERENT
+#     strings, so `sed` never matched anything and exited 0 with nothing
+#     rotated; keeping the instructions in exactly one file is part of the
+#     fix, not incidental). NOTE: Docker Compose's ${VAR} interpolation
 #     only applies to the compose file itself at parse time; it does NOT
 #     expand inside files bind-mounted into the container (this file), and
 #     SearXNG's own YAML loader doesn't expand ${...} either. So this has to
@@ -29,7 +39,7 @@
 use_default_settings: true
 
 server:
-  secret_key: "e2bctgctyctycytc"  # replaced by setup's sed step — see README.md
+  secret_key: "ultrasecretkey"  # replaced by setup's sed step — see README.md
 
 search:
   formats:

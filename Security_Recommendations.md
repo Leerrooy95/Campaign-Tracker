@@ -138,52 +138,79 @@ the fix so it can't silently regress.
       hosts still works (feature preserved); a redirect loop terminates at
       `_MAX_REDIRECTS` instead of hanging. Run: `python3 tests/test_ssrf_guard.py`.
 
-### Phase 2 — HIGH: input validation, transport, and secret handling
+### Phase 2 — HIGH: input validation, transport, and secret handling ✅ DONE
 
-- [ ] **Validate `candidate_id` against FEC's real grammar** before it reaches
-      `fec.py:funding_by_cycle` / `search_fec_candidate` — enforce
-      `^[HSP][0-9A-Z]{8}$` in `app.py` at the point it's read from the POST
-      body (`app.py:655`), reject with a 400 otherwise. Re-check that the
-      "Did You Mean?" resolver flow (`app.py`'s two-phase `/candidates` →
-      `/search`) still passes a well-formed id through the happy path — this
-      must not break normal candidate selection.
-- [ ] **Validate `state`** the same way (`app.py:658` → `congress.py:303`) —
-      two-letter USPS code allowlist (or a regex `^[A-Z]{2}$` post-`.upper()`)
-      before it's interpolated into the Congress.gov member-lookup path.
-      Confirm every real state/territory FEC returns (incl. DC, territories
-      Congress.gov actually covers) still resolves.
-- [ ] **Get authentication in front of any non-loopback deployment.** At
-      minimum: document in the README that binding `0.0.0.0` requires a
-      reverse proxy doing TLS + auth (Basic Auth, an OAuth proxy, Tailscale,
-      etc.) in front of it — same posture the SearXNG container already takes.
-      Consider defaulting `app.run(host=...)` to `127.0.0.1` and requiring an
-      explicit opt-in (env var or flag) to bind wider, so the insecure default
-      an open-source cloner gets by just running the app is the safe one.
-- [ ] **Stop the Anthropic key traveling in a plaintext POST body** on any
-      non-TLS deployment — this is really the same fix as the item above (TLS
-      via reverse proxy); note in the README that the "UI-only, never an env
-      var" design is only as safe as the transport it rides on.
-- [ ] **Get `run.sh` out of the credential path.** Switch the documented setup
-      flow to a `.env` file (already `.gitignore`'d) loaded via
-      `python-dotenv` or a plain `source .env`, or have `run.sh` read from
-      environment variables that are never itself committed with real values
-      — ship `run.sh` with empty/placeholder slots only, and a loud comment
-      telling the operator to use `.env` or `export` instead of editing it in
-      place. Update `CLAUDE.md`'s quick-start section to match (currently
-      tells the operator to paste keys directly into `run.sh`).
-- [ ] **Fix the SearXNG `secret_key` rotation no-op.** The `sed` command
-      targets a placeholder string (`ultrasecretkey`) that doesn't exist in
-      `settings.yml`; fix `docker/searxng/settings.yml` to actually contain
-      that placeholder (or rewrite the setup instructions/README to match
-      whatever placeholder really is in the file), so `openssl rand -hex 32`
-      actually lands. Verify post-fix by grepping the file after running the
-      documented setup step and confirming the key changed.
-- [ ] **Regression / verification pass for this phase** — a lightweight test
-      or manual checklist item per fix: a malformed `candidate_id` (path
-      traversal, injected `#`/`?`) is rejected with a 400 and never reaches
-      `fec.py`; a malformed `state` is rejected before reaching
-      `congress.py`; a fresh `docker/searxng` setup produces a *different*
-      `secret_key` than the shipped default.
+- [x] **Validate `candidate_id` against FEC's real grammar** before it reaches
+      `fec.py:funding_by_cycle` / `search_fec_candidate` — enforced
+      `^[HSP][0-9A-Z]{8}$` at the top of `POST /search` in `app.py`, right
+      where `candidate_id` is read from the POST body, rejecting a non-empty
+      malformed value with a 400 before the worker thread is even spawned
+      (so it never reaches `fec.py` at all). Verified the "Did You Mean?"
+      resolver flow (`/candidates` → `/search`) still passes a real FEC id
+      through end-to-end via the Flask test client — normal candidate
+      selection is unaffected; only malformed/injected shapes are rejected.
+- [x] **Validate `state`** the same way (`app.py` → `congress.py:303`) — a
+      two-letter regex (`^[A-Z]{2}$`) enforced at the same `/search` entry
+      point before `state` is interpolated into the Congress.gov
+      member-lookup path. A bare-name search (no `candidate_id`/`state` at
+      all) still works — both fields are optional and only validated when
+      present.
+- [x] **Get authentication in front of any non-loopback deployment.**
+      `app.py`'s `__main__` block now defaults `HOST` to `127.0.0.1` — the
+      bind an open-source cloner gets from a bare `python3 app.py` or
+      `./run.sh` is loopback-only, matching what the README already told
+      people to expect (`http://localhost:5000`). Binding wider is an
+      explicit `HOST=0.0.0.0` (or LAN address) opt-in that prints a loud
+      warning naming the actual risk (unauthenticated quota use, Anthropic
+      key interception) and pointing at this file. README and CLAUDE.md
+      both updated with the same guidance: a reverse proxy doing TLS + auth
+      in front is required before binding beyond your own machine — the
+      same posture the SearXNG container already takes.
+- [x] **Stop the Anthropic key traveling in a plaintext POST body** on any
+      non-TLS deployment — covered by the same fix as above (the loopback
+      default + reverse-proxy-required guidance); `CLAUDE.md`'s "Anthropic
+      key is secret + transient" note now explicitly says the in-code
+      never-stored hardening only protects the key at rest, not in transit,
+      and points at the bind-address section for the transit fix.
+- [x] **Get `run.sh` out of the credential path.** `run.sh` no longer holds
+      key *values* — it sources a gitignored `.env` file (created from the
+      new tracked `.env.example` template: `cp .env.example .env`, then
+      edit) via `set -a; source .env; set +a`, and falls back to demo mode
+      with a clear stderr message when `.env` is absent. `.gitignore`'s
+      comment and `CLAUDE.md`'s quick-start + "Launching" sections updated
+      to match. Verified end-to-end by actually running `bash run.sh` both
+      with no `.env` (falls back to DEMO, confirmed via `/health`) and with
+      a `.env` carrying a fake key (comes up REAL mode, confirmed via
+      `/health`).
+- [x] **Fix the SearXNG `secret_key` rotation no-op.** Three files had
+      drifted to three different placeholder strings (`settings.yml`'s
+      shipped value, its own comment's claimed value, and the documented
+      `sed` target) — `docker/searxng/settings.yml` now ships the literal
+      value the documented `sed -i "s|ultrasecretkey|...|g"` command
+      actually targets. Went further than a string-match fix: `run.sh` had
+      its own duplicate copy of the same setup instructions (the second
+      copy of a string that can silently drift), so it no longer carries
+      the `sed` command at all — it points at `docker/searxng/README.md`,
+      now the single source of truth. Verified by extracting the real
+      command from the README and actually running it (via `subprocess`)
+      against a temp copy of `settings.yml`: confirmed the file changes, the
+      placeholder is gone, and the new value is a real 64-char hex string.
+- [x] **Regression / verification pass for this phase** —
+      `tests/test_input_validation.py` (candidate_id/state format
+      validation, both against real injection shapes from the audit and the
+      legitimate Did-You-Mean/bare-name flows, driven through the real
+      Flask app via its test client), `tests/test_bind_host_default.py`
+      (spawns the real `app.py` subprocess twice — default and
+      `HOST=0.0.0.0` — and asserts the actual bind address and warning
+      output), `tests/test_run_sh_env.py` (structural checks plus an
+      end-to-end run of the real sourcing logic against a temp `.env`, and a
+      real `bash run.sh` smoke test in both demo and real-mode
+      configurations), `tests/test_searxng_secret_rotation.py` (runs the
+      real, extracted `sed` command against a temp copy of `settings.yml`
+      and confirms rotation actually happens). All run clean; the rest of
+      the existing suite (`tests/test_*.py`) re-run with no regressions —
+      the one still-failing test (`test_export_zip.py`, a Node-step
+      prerequisite) is pre-existing and unrelated to this phase.
 
 ### Phase 3 — MEDIUM: defense-in-depth and resource limits
 

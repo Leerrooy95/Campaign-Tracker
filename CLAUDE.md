@@ -39,8 +39,10 @@ that context.)
 3. **For real data, two free keys, both instant self-service signups**:
    `FEC_API_KEY` (https://api.open.fec.gov/developers/) and
    `CONGRESS_API_KEY` (https://api.data.gov/signup/, same key system covers
-   Congress.gov). Put them in `run.sh` (it has clearly marked slots) and run
-   `bash run.sh` — or `export` them by hand and run `python3 app.py`.
+   Congress.gov). Put them in `.env` (`cp .env.example .env`, then edit —
+   `.env` is gitignored, `run.sh` sources it automatically) and run
+   `bash run.sh` — or `export` them by hand and run `python3 app.py`. Keys go
+   in `.env`, never in `run.sh` itself — see Security_Recommendations.md.
 4. **Statements (what the candidate said) need SearXNG — optional.** If they
    want that track, walk them through `docker/searxng/` (a ready-to-run
    compose file — `cd docker/searxng && cp .env.example .env`, paste a real
@@ -509,10 +511,20 @@ catchable automatically.
   used.
 - **`threaded=True`** on `app.run` is required, or a running worker blocks
   `/status` polls.
+- **Bind address defaults to `127.0.0.1` (post-2026-09-07 fix).** There's no
+  authentication, authorization, or TLS anywhere in the app, so the default a
+  bare `python3 app.py` / `./run.sh` gives an open-source cloner has to be
+  the safe one — this machine only. Set `HOST=0.0.0.0` (or a LAN address) to
+  opt into a wider bind; doing so prints a warning to put a reverse proxy
+  (TLS + auth) in front first. See Security_Recommendations.md.
 - **In-process JOBS dict** is fine single-worker; move to Redis only if you scale
   out.
-- **Launching:** `run.sh` is the launcher — it exports `FEC_API_KEY`,
-  `CONGRESS_API_KEY`, `SEARXNG_URL`, then runs the app. It uses **`python3`** (not
+- **Launching:** `run.sh` is the launcher — it sources `.env` (if present;
+  `cp .env.example .env` then edit — `.env` is gitignored, never committed)
+  for `FEC_API_KEY`, `CONGRESS_API_KEY`, `SEARXNG_URL`, then runs the app.
+  `run.sh` itself carries no real key values (post-2026-09-07 fix — see
+  Security_Recommendations.md; it used to have you paste keys directly into
+  the tracked script). It uses **`python3`** (not
   `python` — Debian/Crostini doesn't symlink `python`). Deps install with
   `pip install -r requirements.txt` (add `--break-system-packages` on
   Debian/Crostini). Typical local dev: edit in code-server, **run on the host**
@@ -535,7 +547,11 @@ catchable automatically.
   submit. This is verified (posting a sentinel key shows it appears nowhere
   in the response). Do not add
   code that persists, logs, or echoes it. (The old FEC rate-limit UI field was
-  repurposed for this — FEC is now env-only.)
+  repurposed for this — FEC is now env-only.) **This in-code hardening only
+  protects the key at rest, not in transit** — it still travels as a
+  cleartext POST body over plain HTTP unless you're behind TLS. The bind
+  default and the reverse-proxy guidance above are the actual fix for that;
+  don't treat "never stored" as "never interceptable."
 - **Congress.gov needs `curl_cffi`** installed to clear its Cloudflare bot-check;
   without it the record stage fails fast and discloses, money side unaffected.
 
