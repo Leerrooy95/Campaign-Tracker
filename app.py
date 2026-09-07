@@ -830,7 +830,16 @@ def create_app() -> Flask:
 
     @app.route("/health")
     def health():
-        return jsonify({"ok": True, "has_fec_key": bool(os.getenv("FEC_API_KEY"))})
+        # `has_fec_key` used to be reported here unconditionally
+        # (Security_Recommendations.md LOW: reconnaissance value — it lets
+        # anyone who reaches the port distinguish a real deployment worth
+        # targeting from a demo one). Dropped rather than kept: nothing in
+        # this app actually consumes it (grep static/app.js — it never has),
+        # this route has no auth in front of it by default, and the operator
+        # who genuinely needs to know already gets it for free from the
+        # startup console banner ("Mode: REAL (FEC_API_KEY found)" / "DEMO").
+        # /health stays a plain liveness check, nothing more.
+        return jsonify({"ok": True})
 
     return app
 
@@ -859,7 +868,22 @@ if __name__ == "__main__":
     # explicit opt-in via HOST, not the default, and prints a loud warning so
     # it's never done silently.
     host = os.getenv("HOST", "127.0.0.1")
-    if host not in ("127.0.0.1", "localhost", "::1"):
+    _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+    # FLASK_DEBUG=1 + a non-loopback HOST is refused outright, not just
+    # warned about (Security_Recommendations.md LOW): the debug default and
+    # the bind default are individually safe, but the interactive Werkzeug
+    # debugger is arbitrary code execution for anyone who reaches the port —
+    # a warning two lines apart from the opt-in is exactly the kind of thing
+    # that's easy to paste past without reading. Refusing to start is the
+    # only guarantee this combination can never ship live.
+    if debug and host not in _LOOPBACK_HOSTS:
+        print(f"  REFUSING TO START: FLASK_DEBUG=1 combined with HOST={host!r}")
+        print(f"  would expose Werkzeug's interactive debugger — arbitrary code")
+        print(f"  execution — to anyone who can reach this address. This")
+        print(f"  combination is blocked, not just warned about. Unset")
+        print(f"  FLASK_DEBUG, or set HOST back to 127.0.0.1, then try again.\n")
+        raise SystemExit(1)
+    if host not in _LOOPBACK_HOSTS:
         print(f"  WARNING: HOST={host!r} — this app has NO built-in authentication,")
         print(f"  authorization, or TLS. Anyone who can reach this address can run jobs")
         print(f"  on your FEC/Congress quota and, if you paste one in, intercept your")

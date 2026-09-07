@@ -346,26 +346,119 @@ the fix so it can't silently regress.
       automated in this suite). Full existing suite (`tests/test_*.py` +
       the Node export tests) re-run clean after every change in this phase.
 
-### Phase 4 — LOW / INFORMATIONAL: cheap wins before release
+### Phase 4 — LOW / INFORMATIONAL: cheap wins before release ✅ DONE
 
-- [ ] **Guard against XML entity-expansion DoS** in `votes.py`'s
-      `ElementTree.fromstring()` calls — switch to `defusedxml` (drop-in
-      replacement) for the LIS XML parsing, or accept the risk explicitly in
-      a comment given the fixed `senate.gov` host with no user-controlled
-      path. Cheap either way; `defusedxml` is a one-import change.
-- [ ] **Decide on `/health`'s `has_fec_key` disclosure** — either accept it
-      (low value to an attacker) or drop the field for an unauthenticated
-      caller once Phase 2's auth-in-front-of-`0.0.0.0` lands.
-- [ ] **Couple the `FLASK_DEBUG` opt-in to the bind address** — refuse to
-      start (or print a loud warning) if `FLASK_DEBUG=1` AND the host isn't
-      loopback, so the two settings can't accidentally combine into a remote
-      Werkzeug debugger.
-- [ ] **Add a scheme allowlist on `static/app.js:578`'s citation links**
-      (`http`/`https` only) even though `votes.py` only emits fixed
-      `clerk.house.gov`/`senate.gov` URLs today — cheap insurance against a
-      future change making citation URLs data-derived.
-- [ ] **Final pass**: re-read this file's "Areas Reviewed — No Findings" table
-      and spot-check that nothing above reopened one of those (e.g. the CSP
-      work in Phase 3 shouldn't introduce a new `innerHTML` sink; the
-      `candidate_id`/`state` validation in Phase 2 shouldn't introduce a new
-      injection point in the validation regex itself).
+- [x] **Guarded against XML entity-expansion DoS** in `votes.py`. All three
+      `ElementTree.fromstring()` call sites (Senate vote-menu XML, per-vote
+      member-position XML, per-vote date re-parse) now go through
+      `defusedxml.ElementTree.fromstring` instead — a drop-in replacement
+      that rejects `<!ENTITY>`/DTD declarations before any expansion. Every
+      surrounding `except ET.ParseError` was widened to
+      `except (ET.ParseError, DefusedXmlException)` — `defusedxml`'s
+      rejection is a `ValueError` subclass, NOT an `ET.ParseError` subclass,
+      so without the widening a blocked payload would have propagated as an
+      unhandled crash instead of the module's existing disclosed-not-crashed
+      contract (`VotesAPIError` from `_parse_senate_menu`, the `PARSE_FAILED`
+      sentinel from `_senate_member_position` — critically NOT `None`,
+      which would have misreported a blocked attack as "member wasn't on
+      this roll," the exact class of fact-invention Rule 4 exists to
+      prevent). **Proved the vulnerability was real first, not theoretical**
+      — a classic "billion laughs" payload was confirmed to actually expand
+      under plain stdlib `ElementTree.fromstring` (300 chars from a 3-level,
+      10-wide bomb — real attacks nest deeper for exponential blowup) before
+      confirming `defusedxml` rejects the same payload outright, and that
+      votes.py's own wrapper functions handle the rejection correctly. Also
+      tested a second attack shape (an external-entity DTD referencing
+      `file:///etc/passwd` — rejected at the DTD-declaration stage, never
+      resolved). Real fixture XML re-parsed to confirm normal operation is
+      unaffected.
+- [x] **Decided on `/health`'s `has_fec_key` disclosure: dropped it.**
+      Nothing in the app actually consumes the field (checked
+      `static/app.js` — never read), it's an unauthenticated route with no
+      auth in front by default, and the operator who genuinely wants to
+      know already gets it for free from the startup console banner
+      ("Mode: REAL (FEC_API_KEY found)" / "DEMO"). `/health` now returns
+      only `{"ok": true}`.
+- [x] **Coupled `FLASK_DEBUG` to the bind address — chose refuse-to-start
+      over a warning.** A warning two lines apart from the opt-in is exactly
+      the kind of thing that's easy to paste past without reading, and the
+      actual risk (Werkzeug's interactive debugger = arbitrary code
+      execution for anyone who reaches the port) is too severe for
+      "probably fine." `FLASK_DEBUG=1` combined with any non-loopback
+      `HOST` now exits 1 before `app.run()` is ever called — verified via
+      real subprocess launches that the port is never actually bound in
+      that case, while `FLASK_DEBUG=1` alone (loopback default) and
+      `HOST=0.0.0.0` alone (debug off, the existing Phase 2 behavior) both
+      still start and serve normally.
+- [x] **Added a scheme allowlist on the roll-call vote citation link**
+      (`static/app.js`, the sole remaining `href=""` sink in the file). A
+      new `safeHref()` helper accepts only `http:`/`https:` URLs — parsed
+      with NO base argument, deliberately, after catching a real bug in an
+      earlier draft: resolving against `window.location.href` silently
+      turned an empty/malformed value into a same-origin URL instead of
+      rejecting it (an empty citation URL would have rendered as a link to
+      the *current page* rather than no link at all — worth noting as a
+      reminder that even a "cheap insurance" fix needs the same
+      verification rigor as anything else). Not currently exploitable
+      (`votes.py` only ever emits fixed `clerk.house.gov`/`senate.gov`
+      URLs) but closes the latent `javascript:`-href path should citation
+      URLs ever become data-derived. Verified against real
+      `clerk.house.gov`/`senate.gov` URLs (preserved), `javascript:`/
+      `data:`/`vbscript:`/`file:` payloads (rejected), and
+      empty/null/undefined/garbage input (rejected, not silently resolved)
+      — plus a live headless-browser pass confirming the votes panel still
+      renders real, clickable citation links from demo data.
+- [x] **Final pass — re-read "Areas Reviewed — No Findings" against every
+      change across all four phases, not just Phase 4's own diff:**
+      - *Command/code injection* — still CLEAR. Grepped all shipped files
+        (excluding `tests/`, which legitimately uses `subprocess.run` with
+        fixed, non-interpolated commands for real end-to-end verification —
+        see Phase 2/3/4's test files) for `subprocess`/`os.system`/`eval`/
+        `exec`/`shell=True`/`pickle`/`yaml.load`: zero hits.
+      - *Directory traversal* — still CLEAR. No new file writes driven by
+        request data anywhere in this work; `.env`/`run.sh` changes are
+        operator-side shell setup, not a web-request code path.
+      - *Client-side XSS* — still CLEAR, and its one noted caveat
+        ("missing CSP" as a control gap) is now RESOLVED by Phase 3. Every
+        `innerHTML` sink was re-walked after all four phases' edits: the
+        Phase 3 swatch-color refactor REMOVED dynamic interpolation from
+        those sinks entirely (hardcoded class names now, vs. a JS color
+        variable before — strictly less surface, not more), and the new
+        `safeHref()` citation link still routes through the pre-existing
+        `escapeHtml()` before landing in the `href=""` attribute — no new
+        unescaped sink introduced anywhere.
+      - *API key leakage* — still CLEAR. Every `print()` added across all
+        four phases (bind warnings, the debug-refusal message, mode
+        banners) is static text; none interpolate an actual key/secret
+        value.
+      - *Job ID predictability* — untouched, still `uuid.uuid4().hex`.
+      - *Secrets in git history* — still CLEAR. Diffed every file changed
+        across all four phases' commits against key-shaped/high-entropy
+        patterns (`FEC_API_KEY=`, `CONGRESS_API_KEY=`, `sk-ant-`, PEM
+        headers, etc.): zero hits: `.env` itself was never committed (only
+        the empty-valued `.env.example` template, which
+        `tests/test_run_sh_env.py` asserts stays empty), and `run.sh` no
+        longer carries key values at all (Phase 2).
+      - Also specifically checked the two examples this item named: the
+        Phase 2 `candidate_id`/`state` regexes (`^[HSP][0-9A-Z]{8}$`,
+        `^[A-Z]{2}$`) are simple, fully-anchored, fixed-character-class
+        patterns with no nested quantifiers and no injection surface of
+        their own (no ReDoS, no dynamic pattern construction); the Phase 3
+        CSP work didn't add any inline `<script>`/`<style>` or new
+        `innerHTML` call.
+- [x] **Regression tests for this phase** — `tests/test_xxe_guard.py` (a
+      real billion-laughs payload proven to expand under stdlib
+      `ElementTree` and rejected under `defusedxml`; both attack shapes
+      against votes.py's actual wrapper functions; real fixture XML
+      re-verified), `tests/test_debug_bind_coupling.py` (real subprocess
+      launches proving the refuse-to-start case never binds the port while
+      both individually-safe configurations still serve normally; `/health`
+      response shape), `tests/test_citation_link_scheme.mjs` (Node,
+      `safeHref` against real citation URLs, four dangerous schemes, and
+      four "should safely reject, not silently resolve" edge cases — the
+      exact class of bug caught in an earlier draft of this fix). Full
+      existing suite (Python + Node) re-run clean throughout, including
+      live browser/subprocess verification consistent with Phases 1–3
+      (headless Chromium confirming the votes panel still renders real
+      citation links; direct `python3 app.py` launches for the bind/debug
+      coupling and `/health` behavior).

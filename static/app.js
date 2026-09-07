@@ -97,6 +97,29 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Scheme allowlist for the one href="" sink in this file (the roll-call vote
+// citation link, votes.py's fixed clerk.house.gov/senate.gov URLs). Not
+// currently attacker-influenced — cheap insurance against a future change
+// making citation URLs data-derived, which would otherwise be a latent
+// javascript: sink (escapeHtml alone quotes correctly but enforces no
+// scheme). Returns "" (falsy, same as an absent URL) for anything but a
+// real http(s) link, so callers can keep their existing `v.url ? <a> : <span>`
+// fallback pattern with no other change.
+function safeHref(url) {
+  // No base argument on purpose: a base would resolve a relative/garbage/
+  // empty value into a same-origin URL instead of rejecting it (e.g.
+  // new URL("", location.href) resolves to the CURRENT PAGE, which is
+  // truthy — silently turning "no citation URL" into "link to this page").
+  // Only a value that is ALREADY a well-formed absolute URL is accepted,
+  // matching what votes.py's citation URLs always are.
+  try {
+    const u = new URL(String(url));
+    return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
+  } catch {
+    return "";
+  }
+}
+
 async function startRun(cand) {
   $("picker").hidden = true;
   $("go").disabled = true;
@@ -574,8 +597,9 @@ function renderVotesPanel(result) {
     row.className = "vote-row";
     const badge = `<span class="vote-pos ${posClass(v.position)}">${escapeHtml(v.position || "?")}</span>`;
     const date = `<span class="vote-date">${escapeHtml(v.date || "")}</span>`;
-    const cite = v.url
-      ? `<a class="vote-cite" href="${escapeHtml(v.url)}" target="_blank" rel="noopener">${escapeHtml(v.citation || "")}</a>`
+    const href = safeHref(v.url);
+    const cite = href
+      ? `<a class="vote-cite" href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(v.citation || "")}</a>`
       : `<span class="vote-cite">${escapeHtml(v.citation || "")}</span>`;
     const meta = [v.question, v.result].filter(Boolean).join(" · ");
     const role = v.candidate_bill_role
