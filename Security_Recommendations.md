@@ -85,3 +85,182 @@ Ranked by what I would gate a deployment on:
 5. **SearXNG `secret_key` rotation that silently does nothing.**
 
 The pipeline's data-integrity engineering is genuinely strong — the StepLog gating, `reconcile.py`, the deterministic ledger and Money Picture, and the disclosed-not-faked discipline are all doing real work, and several classes of bug that plague this kind of tool are structurally closed. The gap is that the same rigor has not been applied to the *network and input boundary*: data arriving from the open web (`statements.py`) and from the client (`app.py`) is trusted at a level the rest of the codebase would never extend to a dollar figure.
+
+---
+
+## Hardening Checklist — path to open-sourcing
+
+Phases are ordered by the same ranking as the findings above (CRITICAL → HIGH →
+MEDIUM → LOW). **Do not open-source before Phase 1 and Phase 2 are both
+checked off** — those are the findings that let an outside party pivot into the
+operator's network or burn/steal their credentials. Phase 3 and 4 are real but
+lower-blast-radius; reasonable to ship a v1 with a couple of Phase 3 items open
+if they're called out in the README, as long as Phase 1–2 are clean.
+
+Each box should only be checked once: (a) the code change is made, (b) it's
+been checked against how that module is actually used elsewhere in the
+pipeline (does it still behave correctly for a normal run — demo mode, a real
+candidate, cached synthesis, etc.), and (c) there's a regression test pinning
+the fix so it can't silently regress.
+
+### Phase 1 — CRITICAL: stop outbound SSRF from `statements.py` ✅ DONE
+
+- [x] **Guard every page fetch behind a resolved-IP allowlist check**
+      (`statements.py:_http_get`, reached from `_page_fetch_pass`). Add
+      `_is_safe_url()`: parses scheme (http/https only), resolves the host via
+      `socket.getaddrinfo`, and rejects loopback / RFC1918 private / link-local
+      (covers `169.254.169.254` cloud metadata) / multicast / reserved /
+      unspecified — including the IPv4-mapped-IPv6 tunnel case. Fails closed on
+      any DNS error.
+- [x] **Close the redirect bypass** — both `curl_cffi` and `urllib` were
+      auto-following 3xx responses, which defeats a hostname-only check.
+      Redirects are now followed manually (`allow_redirects=False` /
+      `_CapturingRedirectHandler`), with `_is_safe_url()` re-run on **every**
+      hop before it's requested, bounded by `_MAX_REDIRECTS` so a redirect loop
+      can't hang the fetch.
+- [x] **Re-verify the canonical/og:url hop is covered, not just documented as
+      safe** — `_canonical_target()`'s docstring now says explicitly that it
+      only vouches for *dating provenance*, not network safety; the actual
+      network guard lives in `_http_get`, which the canonical target is always
+      routed back through before it's fetched.
+- [x] **Confirm the fix doesn't regress the feature it's protecting** — the
+      dating tier-2 pass (page-fetch date recovery) still needs to work for
+      the overwhelming majority of real news/campaign/government pages, which
+      all resolve to public IPs. The guard only blocks resolution to
+      internal/reserved ranges, so normal operation is unaffected; verified via
+      `tests/test_ssrf_guard.py`.
+- [x] **Regression test** — `tests/test_ssrf_guard.py`: private/loopback/
+      link-local/metadata/multicast/unspecified/IPv4-mapped-IPv6 all rejected;
+      non-http(s) schemes rejected; unresolvable host fails closed; the
+      transport is proven *never invoked* for an unsafe host (not just that
+      its result is discarded); a redirect into a private target is refused
+      and the private URL is never fetched; a redirect chain between two safe
+      hosts still works (feature preserved); a redirect loop terminates at
+      `_MAX_REDIRECTS` instead of hanging. Run: `python3 tests/test_ssrf_guard.py`.
+
+### Phase 2 — HIGH: input validation, transport, and secret handling
+
+- [ ] **Validate `candidate_id` against FEC's real grammar** before it reaches
+      `fec.py:funding_by_cycle` / `search_fec_candidate` — enforce
+      `^[HSP][0-9A-Z]{8}$` in `app.py` at the point it's read from the POST
+      body (`app.py:655`), reject with a 400 otherwise. Re-check that the
+      "Did You Mean?" resolver flow (`app.py`'s two-phase `/candidates` →
+      `/search`) still passes a well-formed id through the happy path — this
+      must not break normal candidate selection.
+- [ ] **Validate `state`** the same way (`app.py:658` → `congress.py:303`) —
+      two-letter USPS code allowlist (or a regex `^[A-Z]{2}$` post-`.upper()`)
+      before it's interpolated into the Congress.gov member-lookup path.
+      Confirm every real state/territory FEC returns (incl. DC, territories
+      Congress.gov actually covers) still resolves.
+- [ ] **Get authentication in front of any non-loopback deployment.** At
+      minimum: document in the README that binding `0.0.0.0` requires a
+      reverse proxy doing TLS + auth (Basic Auth, an OAuth proxy, Tailscale,
+      etc.) in front of it — same posture the SearXNG container already takes.
+      Consider defaulting `app.run(host=...)` to `127.0.0.1` and requiring an
+      explicit opt-in (env var or flag) to bind wider, so the insecure default
+      an open-source cloner gets by just running the app is the safe one.
+- [ ] **Stop the Anthropic key traveling in a plaintext POST body** on any
+      non-TLS deployment — this is really the same fix as the item above (TLS
+      via reverse proxy); note in the README that the "UI-only, never an env
+      var" design is only as safe as the transport it rides on.
+- [ ] **Get `run.sh` out of the credential path.** Switch the documented setup
+      flow to a `.env` file (already `.gitignore`'d) loaded via
+      `python-dotenv` or a plain `source .env`, or have `run.sh` read from
+      environment variables that are never itself committed with real values
+      — ship `run.sh` with empty/placeholder slots only, and a loud comment
+      telling the operator to use `.env` or `export` instead of editing it in
+      place. Update `CLAUDE.md`'s quick-start section to match (currently
+      tells the operator to paste keys directly into `run.sh`).
+- [ ] **Fix the SearXNG `secret_key` rotation no-op.** The `sed` command
+      targets a placeholder string (`ultrasecretkey`) that doesn't exist in
+      `settings.yml`; fix `docker/searxng/settings.yml` to actually contain
+      that placeholder (or rewrite the setup instructions/README to match
+      whatever placeholder really is in the file), so `openssl rand -hex 32`
+      actually lands. Verify post-fix by grepping the file after running the
+      documented setup step and confirming the key changed.
+- [ ] **Regression / verification pass for this phase** — a lightweight test
+      or manual checklist item per fix: a malformed `candidate_id` (path
+      traversal, injected `#`/`?`) is rejected with a 400 and never reaches
+      `fec.py`; a malformed `state` is rejected before reaching
+      `congress.py`; a fresh `docker/searxng` setup produces a *different*
+      `secret_key` than the shipped default.
+
+### Phase 3 — MEDIUM: defense-in-depth and resource limits
+
+- [ ] **Neutralize CSV formula injection** in `static/export.js:csvCell` —
+      prefix a leading `=`, `+`, `-`, `@`, tab, or CR in any cell value with a
+      `'` (or wrap per the OWASP CSV-injection guidance) before RFC-4180
+      quoting. Check this doesn't corrupt legitimate values that start with
+      those characters (e.g. a negative dollar figure in a transactions
+      export) — the prefix should be visually inert when opened, not change
+      the underlying number.
+- [ ] **Mark untrusted data as untrusted in the synthesis prompt**
+      (`synthesis.py:build_digest` → the model call). Add explicit delimiting/
+      framing around statement excerpts sourced from the open web — e.g. wrap
+      them in a clearly-labeled block with an instruction that the enclosed
+      text is data, never instructions, mirroring the existing "PROVIDED DATA
+      ONLY" framing. This is prompt-hardening, not a code guarantee — the
+      real backstop stays `reconcile.py`; don't let this item substitute for
+      it. Re-run a couple of cached vs. fresh synthesis calls to confirm the
+      report's prose quality doesn't degrade from the added framing.
+- [ ] **Make `flask-limiter` a hard dependency**, not an optional degrade-to-
+      no-op — add it to `requirements.txt` if it isn't pinned there, and fail
+      startup loudly (or at least log a clear warning) if it's missing rather
+      than silently disabling rate limiting. Add `ProxyFix` so `key_func`
+      reads the real client IP behind a reverse proxy instead of collapsing
+      every client onto the proxy's address. Extend limits to `/status` and
+      confirm normal polling (the frontend's live `/status` loop) doesn't get
+      throttled by whatever limit is chosen.
+- [ ] **Cap concurrent jobs.** Add a bounded queue or a simple semaphore around
+      job creation in `app.py` so an unbounded `threading.Thread` isn't
+      spawned per `/search`, and confirm `_sweep_old_jobs()` still runs
+      predictably under load. Verify a normal multi-tab research session (a
+      few concurrent searches) still works after the cap is added.
+- [ ] **Fix the `curl_cffi` read-bound bypass** — `statements.py`'s primary
+      transport downloads the full response before slicing to
+      `_FETCH_MAX_BYTES`; switch to `curl_cffi`'s streaming mode (or an
+      explicit content-length check) so the 256 KB cap holds on the path
+      that's actually used in production, matching what the `urllib` fallback
+      already does correctly.
+- [ ] **Add CSRF protection** on `/search` and `/candidates` — a same-site
+      cookie flag plus a simple per-session token is enough given there's no
+      auth system yet; reject `request.form` fallback parsing if it doesn't
+      carry the token. Confirm the frontend (`static/app.js`) is updated to
+      send whatever token mechanism is added, or normal searches from the
+      bundled UI will start failing.
+- [ ] **Add missing security headers** — `Content-Security-Policy`,
+      `Referrer-Policy`, `Permissions-Policy`, and HSTS (once TLS is in front
+      of the app) alongside the existing `X-Content-Type-Options` /
+      `X-Frame-Options`. Test the CSP against the actual page — inline
+      `<script>`/`<style>` in `templates/index.html` will need either a nonce
+      or to move into `static/`, so check the page still renders and all four
+      charts + the swimlane still draw before calling this done.
+- [ ] **Validate `SEARXNG_URL`** the same way as the page-fetch guard (Phase 1)
+      if/when it ever becomes request-scoped rather than operator/env-only —
+      not urgent while it's env-only, but worth a one-line comment in
+      `statements.py` pointing future editors at `_is_safe_url()` so this
+      doesn't get reintroduced as a live SSRF later.
+
+### Phase 4 — LOW / INFORMATIONAL: cheap wins before release
+
+- [ ] **Guard against XML entity-expansion DoS** in `votes.py`'s
+      `ElementTree.fromstring()` calls — switch to `defusedxml` (drop-in
+      replacement) for the LIS XML parsing, or accept the risk explicitly in
+      a comment given the fixed `senate.gov` host with no user-controlled
+      path. Cheap either way; `defusedxml` is a one-import change.
+- [ ] **Decide on `/health`'s `has_fec_key` disclosure** — either accept it
+      (low value to an attacker) or drop the field for an unauthenticated
+      caller once Phase 2's auth-in-front-of-`0.0.0.0` lands.
+- [ ] **Couple the `FLASK_DEBUG` opt-in to the bind address** — refuse to
+      start (or print a loud warning) if `FLASK_DEBUG=1` AND the host isn't
+      loopback, so the two settings can't accidentally combine into a remote
+      Werkzeug debugger.
+- [ ] **Add a scheme allowlist on `static/app.js:578`'s citation links**
+      (`http`/`https` only) even though `votes.py` only emits fixed
+      `clerk.house.gov`/`senate.gov` URLs today — cheap insurance against a
+      future change making citation URLs data-derived.
+- [ ] **Final pass**: re-read this file's "Areas Reviewed — No Findings" table
+      and spot-check that nothing above reopened one of those (e.g. the CSP
+      work in Phase 3 shouldn't introduce a new `innerHTML` sink; the
+      `candidate_id`/`state` validation in Phase 2 shouldn't introduce a new
+      injection point in the validation regex itself).

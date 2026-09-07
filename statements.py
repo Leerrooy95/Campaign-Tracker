@@ -34,9 +34,11 @@ next step; this layer gathers the sourced, dated leads.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
+import socket
 import urllib.parse
 import urllib.request
 import datetime
@@ -395,35 +397,122 @@ _BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 
-def _http_get(url: str) -> Optional[str]:
-    """GET one page, bounded read + short timeout, HTML only. Returns the html
-    text or None. Follows HTTP 3xx automatically (curl_cffi / urllib default);
-    never raises."""
+# SSRF guard. Page URLs here come from two attacker-reachable sources: raw
+# SearXNG results (arbitrary indexed web pages) and a fetched page's OWN
+# canonical/og:url (fully attacker-controlled HTML). Neither transport's
+# default redirect-following can be trusted — a hostname check alone is
+# bypassable by a 3xx to a private target — so every URL we're about to
+# request, including each redirect hop, is resolved and checked here BEFORE
+# the socket opens. Blocks loopback/private/link-local/multicast/reserved
+# ranges (this covers the 169.254.169.254 cloud-metadata address) and
+# IPv4-mapped-in-IPv6 tricks. Fails closed: anything unresolvable or
+# ambiguous is treated as unsafe.
+_MAX_REDIRECTS = 3
+
+
+def _is_safe_url(url: str) -> bool:
+    """True only for an http(s) URL whose host resolves EXCLUSIVELY to public,
+    non-internal IPs. Used before every request/redirect hop in _http_get."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except Exception:   # noqa: BLE001
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:   # noqa: BLE001 — unresolvable host is not safe to fetch
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        raw_ip = info[4][0].split("%")[0]   # strip IPv6 zone id
+        try:
+            ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            return False
+        candidates = [ip]
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None:
+            candidates.append(mapped)
+        for c in candidates:
+            if (c.is_private or c.is_loopback or c.is_link_local or
+                    c.is_multicast or c.is_reserved or c.is_unspecified):
+                return False
+    return True
+
+
+class _RedirectBlocked(Exception):
+    """Raised by _CapturingRedirectHandler to stop urllib from auto-following a
+    redirect; the target is validated by the caller before it's ever fetched."""
+    def __init__(self, url: str):
+        super().__init__(url)
+        self.url = url
+
+
+class _CapturingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):   # noqa: D102
+        raise _RedirectBlocked(newurl)
+
+
+def _http_get_once(url: str) -> tuple[Optional[str], Optional[str]]:
+    """One request, redirects NOT followed automatically. Returns
+    (html_or_None, redirect_target_or_None) — exactly one is non-None on a
+    handled response; both None on any failure."""
     try:
         if _HAVE_CURL:
             resp = _curl.get(url, impersonate="chrome", timeout=_FETCH_TIMEOUT,
-                             headers={"Accept": "text/html"})
+                             headers={"Accept": "text/html"}, allow_redirects=False)
+            if resp.status_code in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("Location")
+                return None, urllib.parse.urljoin(url, loc) if loc else None
             if resp.status_code != 200:
-                return None
+                return None, None
             ctype = resp.headers.get("Content-Type", "")
             if "html" not in ctype and "xml" not in ctype:
-                return None
-            return resp.text[:_FETCH_MAX_BYTES]
+                return None, None
+            return resp.text[:_FETCH_MAX_BYTES], None
         req = urllib.request.Request(url, headers={
             "Accept": "text/html", "User-Agent": _BROWSER_UA})
-        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
+        opener = urllib.request.build_opener(_CapturingRedirectHandler)
+        with opener.open(req, timeout=_FETCH_TIMEOUT) as resp:
             ctype = (resp.headers.get("Content-Type") or "")
             if "html" not in ctype and "xml" not in ctype:
-                return None
-            return resp.read(_FETCH_MAX_BYTES).decode("utf-8", errors="replace")
+                return None, None
+            return resp.read(_FETCH_MAX_BYTES).decode("utf-8", errors="replace"), None
+    except _RedirectBlocked as e:
+        return None, e.url
     except Exception:   # noqa: BLE001 — dating is best-effort, never fatal
-        return None
+        return None, None
+
+
+def _http_get(url: str) -> Optional[str]:
+    """GET one page, bounded read + short timeout, HTML only, following up to
+    _MAX_REDIRECTS hops — each hop (including the first) re-validated against
+    _is_safe_url before it is requested, so a 3xx into the operator's internal
+    network is refused rather than silently followed. Never raises."""
+    for _ in range(_MAX_REDIRECTS + 1):
+        if not _is_safe_url(url):
+            return None
+        html, redirect_to = _http_get_once(url)
+        if html is not None:
+            return html
+        if redirect_to is None:
+            return None
+        url = redirect_to
+    return None
 
 
 def _canonical_target(html: str, url: str) -> Optional[str]:
     """A single, safe redirect hop: the page's own declared canonical/og:url,
     when it differs from the URL we fetched. Handles stub/aggregator/AMP pages
-    whose date lives on the canonical version. Returns None if same or absent."""
+    whose date lives on the canonical version. Returns None if same or absent.
+    "Safe" here means dating-provenance-safe (the page's own declared target);
+    network safety is enforced separately, in _http_get, when that target is
+    actually fetched."""
     for pat in (_CANONICAL_RE, _OG_URL_RE):
         m = pat.search(html or "")
         if m:
