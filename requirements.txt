@@ -1,0 +1,8 @@
+flask>=3.0
+flask-limiter>=3.5   # optional — app degrades gracefully without it
+curl_cffi>=0.6       # browser-TLS: clears api.congress.gov's Cloudflare check AND
+                     # lifts the statements page-fetch dating hit rate (both fall
+                     # back to urllib without it — degraded, never fatal)
+# later, for export.py (six-format reports, lifted from Friction_Breaker):
+# python-docx>=1.1
+# reportlab>=4.0
