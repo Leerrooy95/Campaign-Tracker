@@ -186,6 +186,14 @@ where and why it stopped.
   takes `individuals_only` (default True); **Hop 2 (`trace_spender_donors`) passes
   False on purpose** so PAC-to-PAC transfers into a super PAC are captured — an
   empty Hop-2 result then genuinely means dark money, not just "no individuals."
+  **This was silently broken until the 2026-09-07 fix** (flagged by a GitHub
+  Copilot review comment): the base request-params dict set
+  `is_individual: "true"` unconditionally, ahead of the `if individuals_only:`
+  branch, so `individuals_only=False` never actually removed it — Hop 2 stayed
+  individuals-only the whole time, missing exactly the PAC-to-PAC transfers it
+  exists to find. Fixed by only setting the param inside the conditional (it's
+  omitted entirely when `individuals_only=False`). Regression:
+  `tests/test_schedule_a_pagination.py`.
 - **#3396**: openFEC Schedule E pagination under-returns; the code cross-checks
   count vs rows and flags `incomplete` rather than reporting a false total.
 - **Cycles**: campaign finance is 2-year; the small-dollar (unitemized) share

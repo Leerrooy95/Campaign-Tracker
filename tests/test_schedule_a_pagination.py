@@ -104,6 +104,56 @@ def test_amount_sort_cursor():
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 1b. Hop-2 tracing (individuals_only=False) must actually omit the
+#     is_individual filter — a real pre-existing bug (flagged by a GitHub
+#     Copilot review comment on this PR, verified against the code and
+#     fixed here): the base params dict used to set is_individual=true
+#     unconditionally, before the `if individuals_only:` branch, so
+#     individuals_only=False never took the filter back off. That silently
+#     kept trace_spender_donors (Hop 2 — tracing who funds a super PAC)
+#     individuals-only, missing exactly the PAC-to-PAC transfers it exists
+#     to find; CLAUDE.md documents this filter as load-bearing ONLY for the
+#     direct-donor view (Pipe 1), explicitly OFF for Hop 2.
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_individuals_only_false_omits_filter():
+    requested_urls = []
+
+    def fake_http(url):
+        requested_urls.append(url)
+        body = json.dumps({
+            "results": [_row("A1", 5000.0)],
+            "pagination": {"pages": 1, "last_indexes": {}},
+        })
+        return 200, body
+
+    orig = fec._http_get_with_retry
+    fec._http_get_with_retry = fake_http
+    try:
+        fec.fetch_schedule_a("C00000000", "k", 2026, individuals_only=False)
+    finally:
+        fec._http_get_with_retry = orig
+
+    url = requested_urls[0]
+    # NOTE: "is_individual" also appears inside the `fields=` list (it's one
+    # of the requested response columns) — check for the QUERY PARAM form
+    # ("is_individual=") specifically, not a bare substring match.
+    check("individuals_only=False omits the is_individual query param",
+          "is_individual=" not in url, url)
+
+    # And the default (individuals_only=True) still sends it — Pipe 1's
+    # direct-donor view must keep filtering out committee transfers.
+    requested_urls.clear()
+    fec._http_get_with_retry = fake_http
+    try:
+        fec.fetch_schedule_a("C00000000", "k", 2026)
+    finally:
+        fec._http_get_with_retry = orig
+    check("individuals_only default (True) still sends is_individual=true",
+          "is_individual=true" in requested_urls[0], requested_urls[0])
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 2. A later page that keeps failing after retries must surface as
 #    truncated=True all the way through search_fec_candidate → to_jsonable
 #    → app._summarize_direct (not silently dropped).
@@ -235,6 +285,7 @@ def test_sched_a_step_warns_on_truncation():
 
 def main() -> int:
     test_amount_sort_cursor()
+    test_individuals_only_false_omits_filter()
     test_truncation_propagates_to_summarize_direct()
     test_sched_a_step_warns_on_truncation()
 

@@ -58,11 +58,27 @@ a truncated pull gets disclosed.
   FEC's own `/totals`), so there was nothing for that gate to actually
   protect, and `sched_e`'s incomplete flag was never allowed to block
   anything either.
+- **`fec.py` — Hop-2 dark-money tracing (`trace_spender_donors`) silently
+  stayed individuals-only, missing PAC-to-PAC transfers into a super PAC.**
+  Flagged by a GitHub Copilot review comment on the PR for the fixes above,
+  verified against the code and fixed the same day. `fetch_schedule_a`'s
+  base request-params dict set `is_individual: "true"` unconditionally,
+  ahead of the `if individuals_only:` branch a few lines down — so calling
+  with `individuals_only=False` (exactly what Hop 2 does, on purpose, per
+  its own docstring) never actually removed the filter. An empty Hop-2
+  result was supposed to mean "this super PAC's money traces to dark
+  money (a 501(c)(4))"; instead it could also just mean "this super PAC's
+  incoming money happened to arrive from other committees, which the
+  filter was hiding." Fixed by only setting the param inside the
+  conditional, so it's omitted from the request entirely when
+  `individuals_only=False`.
 - Regression: `tests/test_schedule_a_pagination.py` — an amount-sorted
   fixture pins the correct cursor key on page 2 (and that a bare
-  `...date=None` is never sent), and an end-to-end run through
-  `app._run_search` confirms a forced later-page failure surfaces as a
-  `warn` on the `sched_a` step, not an `ok`.
+  `...date=None` is never sent); a fixture confirms `individuals_only=False`
+  omits the `is_individual` query param while the default still sends it;
+  and an end-to-end run through `app._run_search` confirms a forced
+  later-page failure surfaces as a `warn` on the `sched_a` step, not an
+  `ok`.
 
 ### Changed
 

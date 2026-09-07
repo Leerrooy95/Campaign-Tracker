@@ -318,36 +318,31 @@ def fetch_schedule_a(committee_id: str, api_key: str, cycle: int,
                      else ("-contribution_receipt_amount" if max_pages
                            else "contribution_receipt_date")),
             "per_page": str(_PER_PAGE),
-            "is_individual": "true",  # KNOWN OPEN QUESTION, not yet resolved:
-                                       # this was meant to exclude conduit/
-                                       # committee-transfer noise, but every
-                                       # raw record we've actually seen in
-                                       # this dataset (filtered AND unfiltered
-                                       # samples) carried line_number "11AI" —
-                                       # literally "Contributions From
-                                       # Individuals/Persons Other Than
-                                       # Political Committees" — meaning this
-                                       # filter may also be excluding real,
-                                       # legitimate direct PAC-to-candidate
-                                       # contributions, not just transfer
-                                       # noise. The pac_or_org bucket in
-                                       # DonorTotal can structurally never
-                                       # fire while this filter is on. NOT
-                                       # YET TESTED: pull a real sample
-                                       # without this filter and check the
-                                       # entity_type distribution before
-                                       # changing it — removing it blind
-                                       # risks reintroducing the conduit
-                                       # double-counting this filter may
-                                       # also have been protecting against.
             "fields": ",".join(SCHEDULE_A_FIELDS),
         }
         # is_individual=true excludes committee-to-committee transfers. That's
         # right for the candidate-donor view (Pipe 1), but WRONG for Hop 2:
         # tracing who funds a super PAC, PAC-to-PAC transfers INTO it are exactly
         # the routing path we want to see. So Hop 2 calls with
-        # individuals_only=False. (See the long note above on why this filter is
-        # load-bearing for the direct-donor view.)
+        # individuals_only=False, and the param must be OMITTED entirely in
+        # that case (a bug fixed here: the filter used to be set unconditionally
+        # above, before this branch, so individuals_only=False never actually
+        # took effect — Hop-2 dark-money tracing silently stayed
+        # individuals-only, missing exactly the PAC-to-PAC transfers it exists
+        # to find).
+        #
+        # KNOWN OPEN QUESTION, not yet resolved: is_individual=true was meant
+        # to exclude conduit/committee-transfer noise, but every raw record
+        # we've actually seen in this dataset (filtered AND unfiltered
+        # samples) carried line_number "11AI" — literally "Contributions From
+        # Individuals/Persons Other Than Political Committees" — meaning this
+        # filter may also be excluding real, legitimate direct PAC-to-candidate
+        # contributions, not just transfer noise. The pac_or_org bucket in
+        # DonorTotal can structurally never fire while this filter is on. NOT
+        # YET TESTED: pull a real sample without this filter and check the
+        # entity_type distribution before changing it — removing it blind
+        # risks reintroducing the conduit double-counting this filter may
+        # also have been protecting against.
         if individuals_only:
             params["is_individual"] = "true"
         # Resume by echoing back whatever keyset cursor FEC handed us last page.
