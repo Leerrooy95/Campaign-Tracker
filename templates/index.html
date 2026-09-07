@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Campaign Tracker</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Campaign Tracker</h1>
+      <p class="sub">Rhetoric vs. funding, federal-first. The process below is the audit trail.</p>
+    </header>
+
+    <form id="search-form" autocomplete="off">
+      <div class="main-row">
+        <input id="name" type="text" placeholder="Candidate name (e.g. Ossoff)" aria-label="Candidate name">
+        <button id="go" type="submit">Search</button>
+      </div>
+      <div id="key-block" class="key-block">
+        <label for="anthropic-key">
+          Optional — paste an
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic API key</a>
+          to generate the plain-language report.
+          <span class="key-note">Used for this request only — never saved, logged, or stored.</span>
+        </label>
+        <input id="anthropic-key" type="password" placeholder="sk-ant-… (optional, never stored)"
+               aria-label="Optional Anthropic API key"
+               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </div>
+    </form>
+    <p id="mode" class="mode" hidden></p>
+
+    <!-- "Did You Mean?" candidate picker: shown after a search so the exact FEC
+         candidate (office + cycle) is always confirmed before the run. -->
+    <section id="picker" hidden>
+      <h2 id="picker-title">Did you mean…</h2>
+      <p id="picker-note" class="picker-note"></p>
+      <div id="picker-list" class="picker-list"></div>
+    </section>
+
+    <!-- the live trace: this is the visible-process / self-check display -->
+    <section id="trace" hidden>
+      <h2>Process</h2>
+      <ol id="steps"></ol>
+    </section>
+
+    <!-- warnings that rode through (built from log.warnings()) -->
+    <section id="audit" hidden>
+      <h2>Caveats carried into the result</h2>
+      <ul id="audit-list"></ul>
+    </section>
+
+    <!-- data export: the full collected dataset as CSVs + a ZIP, kept OFF the
+         page (download-only) so it doesn't bury the charts and report. All of
+         it is built in the browser from data /status already delivered. -->
+    <section id="export-panel" hidden>
+      <h2>Data export</h2>
+      <p class="chart-note">The full collected dataset, wrangled into CSVs — download without the on-page dump. Figures match the charts and report above; caveats there apply.</p>
+      <div id="export-list" class="export-list"></div>
+      <div class="export-actions">
+        <button id="export-all" type="button">Download all (ZIP)</button>
+      </div>
+    </section>
+
+    <!-- money composition (rendered from FEC data — shows with or without a report) -->
+    <section id="money-panel" hidden>
+      <h2>Funding composition by cycle</h2>
+      <div class="chart" id="money-chart"></div>
+      <div class="legend" id="money-legend"></div>
+      <p class="chart-note">Bar height is contributions by source (small-dollar + large-donor + PAC); the figure above each bar is total receipts for the cycle. Outside spending is tracked separately.</p>
+    </section>
+
+    <!-- outside spending (Schedule E) — current cycle, per spender, dark flagged -->
+    <section id="outside-panel" hidden>
+      <h2 id="outside-title">Outside spending by group</h2>
+      <div class="chart" id="outside-chart"></div>
+      <p class="chart-note" id="outside-note"></p>
+    </section>
+
+    <!-- cross-cycle outside-spending trend — for/against per cycle, from the
+         composition data FEC's own aggregate already supplied. Companion to the
+         current-cycle per-spender chart above. -->
+    <section id="trend-panel" hidden>
+      <h2>Outside spending across cycles</h2>
+      <div class="chart" id="trend-chart"></div>
+      <div class="legend" id="trend-legend"></div>
+      <p class="chart-note" id="trend-note"></p>
+    </section>
+
+    <!-- timeline swimlane — the side-by-side method as a picture: money, record
+         (bills + votes), and the candidate's own statements on three lanes over
+         the same month bands timeline.py already built. Deterministic re-render
+         of timeline.events; no model involved. -->
+    <section id="timeline-panel" hidden>
+      <h2>Side-by-side timeline</h2>
+      <div class="chart chart-scroll" id="timeline-chart"></div>
+      <div class="legend" id="timeline-legend"></div>
+      <p class="chart-note" id="timeline-note"></p>
+    </section>
+
+    <!-- roll-call votes (Track B) — money/finance-relevant floor votes with the
+         member's position, each row linking to the primary source
+         (House Clerk / Senate LIS). Deterministic render from track_b_votes. -->
+    <section id="votes-panel" hidden>
+      <h2 id="votes-title">Roll-call votes on money &amp; influence</h2>
+      <div id="votes-list" class="votes-list"></div>
+      <p class="chart-note" id="votes-note"></p>
+    </section>
+
+    <!-- plain-language report (translation layer; only when synthesized) -->
+    <section id="report" hidden>
+      <h2>Report</h2>
+      <p id="report-meta" class="meta"></p>
+      <div id="report-text" class="report"></div>
+    </section>
+
+    <!-- raw data: the verifiable source, collapsed so it doesn't bury the report -->
+    <section id="result" hidden>
+      <details id="raw-toggle">
+        <summary>Raw data (JSON) — the verifiable source; every line of the report traces back to this</summary>
+        <pre id="result-json"></pre>
+      </details>
+    </section>
+
+    <p id="error" class="error" hidden></p>
+  </main>
+
+  <script src="/static/export.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
