@@ -1,0 +1,37 @@
+# SearXNG settings override for Campaign Tracker.
+#
+# `use_default_settings: true` merges this file with the image's shipped
+# searx/settings.yml, so we only have to state what this project actually
+# needs changed — everything else (engines, UI, etc.) stays at the image's
+# defaults:
+#
+#   - search.formats: the image ships with only "html" enabled. statements.py
+#     queries SearXNG with format=json (see statements.py's _searxng_search);
+#     against a default install that returns a 403. Adding "json" here is the
+#     one thing this project actually requires.
+#
+#   - server.secret_key: the value below is a placeholder ("e2bckiiubpiubvuib")
+#     that setup replaces in-place with a real random value via `sed` — see
+#     docker/searxng/README.md. NOTE: Docker Compose's ${VAR} interpolation
+#     only applies to the compose file itself at parse time; it does NOT
+#     expand inside files bind-mounted into the container (this file), and
+#     SearXNG's own YAML loader doesn't expand ${...} either. So this has to
+#     be a literal string swapped before first run, not an env var read at
+#     container start — same mechanism the official searxng-docker project
+#     uses for the same reason.
+#
+# Deliberately NOT touched: server.limiter. It defaults to false in the base
+# settings, which is what we want — this instance serves one local script
+# calling its own JSON API, not the public internet, so there's no bot
+# traffic to rate-limit. Turning the limiter on would require a Valkey/Redis
+# container this minimal compose file doesn't run, and would start blocking
+# statements.py's own queries.
+use_default_settings: true
+
+server:
+  secret_key: "e2bctgctyctycytc"  # replaced by setup's sed step — see README.md
+
+search:
+  formats:
+    - html
+    - json

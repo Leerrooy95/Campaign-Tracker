@@ -1,0 +1,63 @@
+# docker-compose.yml — a local SearXNG instance for statements.py (Track B:
+# what a candidate SAID). This is a self-hosted, no-paid-search backend for
+# ONE script's own JSON queries — not a public search engine — so it's kept
+# deliberately minimal: no reverse proxy, no Valkey cache, bound to localhost
+# only. If you want a public/hardened multi-user instance instead, use the
+# official searxng-docker repo (https://github.com/searxng/searxng-docker)
+# and just point SEARXNG_URL at it.
+#
+# Setup:
+#   cd docker/searxng
+#   cp .env.example .env                # port override only, see .env.example
+#   sed -i "s|ultrasecretkey|$(openssl rand -hex 32)|g" settings.yml
+#     # Mac: sed -i '' "s|ultrasecretkey|$(openssl rand -hex 32)|g" settings.yml
+#   docker compose up -d
+#
+# SearXNG is now at http://localhost:8080 — that's the SEARXNG_URL value
+# run.sh expects. Check it started cleanly with: docker compose logs -f
+#
+# Why settings.yml is mounted at all: SearXNG ships with its JSON output
+# format disabled by default (only html). Without it, statements.py's
+# `format=json` requests get rejected. settings.yml (next to this file) turns
+# json on — see that file for exactly what it changes and why nothing else
+# needs to.
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: campaign-tracker-searxng
+    restart: unless-stopped
+    ports:
+      # 127.0.0.1-only on purpose: this instance answers an unauthenticated
+      # JSON API. Don't rebind to 0.0.0.0 without adding auth/a reverse proxy
+      # in front of it first (see CLAUDE.md's note on locking down a
+      # cloud-hosted SearXNG with Cloudflare Access / Tailscale).
+      - "127.0.0.1:${SEARXNG_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8080}/
+      # Force IPv4. The image bakes in GRANIAN_HOST=:: (its app server,
+      # Granian, listens dual-stack IPv6+IPv4 by default), which crashes on
+      # startup with "Address family not supported by protocol" (EAFNOSUPPORT)
+      # on any host/container network without IPv6 — confirmed against a real
+      # IPv6-less sandbox, not a hypothetical (docker inspect the image and
+      # check Config.Env if this ever needs re-verifying against a newer
+      # tag). We only ever publish the IPv4 127.0.0.1 port above anyway, so
+      # there's no reason to ask for IPv6 in the first place.
+      - GRANIAN_HOST=0.0.0.0
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-data:/var/cache/searxng
+    healthcheck:
+      # python3, not wget/curl: Granian serves the Python SearXNG app itself,
+      # so python3 is guaranteed present in this image regardless of which
+      # shell utilities the base layer does or doesn't ship.
+      test: ["CMD", "python3", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  searxng-data:
