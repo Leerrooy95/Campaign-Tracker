@@ -33,12 +33,30 @@ import re
 import time
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET   # types (ET.Element) and ET.ParseError only — see below
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring as _parse_xml
+
 import congress as _congress
 from congress import CongressAPIError, _money_match   # SAME whole-word regex tagging
+
+# Security_Recommendations.md LOW: stdlib ElementTree.fromstring is
+# documented-vulnerable to entity-expansion ("billion laughs") and quadratic
+# blowup DoS (not XXE/file disclosure — ET never resolves external entities
+# or fetches DTDs). All THREE parse sites below (Senate vote-menu XML,
+# per-vote member-position XML, per-vote date-only re-parse) now go through
+# defusedxml's fromstring instead, a drop-in replacement that rejects
+# entity declarations, DTDs, and external references before expansion. A
+# rejected payload raises `DefusedXmlException` (a `ValueError` subclass,
+# NOT an `ET.ParseError` subclass) — every `except ET.ParseError` below is
+# widened to `except (ET.ParseError, DefusedXmlException)` so a blocked
+# malicious payload is disclosed the same way a malformed one already was
+# (PARSE_FAILED / VotesAPIError), never an unhandled crash. Realistic
+# exploitability was always low here (a fixed senate.gov host, no
+# user-controlled path — see the audit) but the fix is a two-line change.
 
 CONGRESS_BASE = _congress.CONGRESS_BASE
 SENATE_LIS_BASE = "https://www.senate.gov/legislative/LIS"
@@ -199,8 +217,8 @@ def _parse_senate_menu(xml_bytes: bytes, congress_num: int, session: int) -> lis
     result, issue). en-bloc votes lack their own top-level question/result —
     they still get title + date, which is what the tagging needs."""
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError as e:
+        root = _parse_xml(xml_bytes)
+    except (ET.ParseError, DefusedXmlException) as e:
         raise VotesAPIError(f"Senate vote menu {congress_num}-{session} unparseable: {e}")
     year = int(_text(root, "congress_year") or 0)
     out = []
@@ -238,8 +256,8 @@ def _senate_member_position(xml_bytes: bytes, last_name: str, state: str):
       - PARSE_FAILED when the XML itself was unreadable — a source problem the
         caller must disclose, never a claim about the member."""
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
+        root = _parse_xml(xml_bytes)
+    except (ET.ParseError, DefusedXmlException):
         return PARSE_FAILED
     ln, st = last_name.strip().lower(), state.strip().upper()
     for m in root.iter("member"):
@@ -307,10 +325,10 @@ def senate_vote_record(last_name: str, state: str,
             continue
         # Prefer the per-vote XML's full date (it carries the year explicitly).
         try:
-            root = ET.fromstring(xml_bytes)
+            root = _parse_xml(xml_bytes)
             full = _parse_lis_date(_text(root, "vote_date"),
                                    int(_text(root, "congress_year") or 0))
-        except ET.ParseError:
+        except (ET.ParseError, DefusedXmlException):
             full = ""
         date = full or v["date"]
         terms = _money_match(v["title"])

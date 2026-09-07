@@ -18,11 +18,29 @@
   // Quote a field iff it contains a comma, quote, CR, or LF; double interior
   // quotes. Titles and statement excerpts routinely contain all four, so this
   // is the one part that actually has to be correct.
+  //
+  // CSV/DDE FORMULA-INJECTION GUARD (Security_Recommendations.md MEDIUM).
+  // Statement titles/excerpts come from arbitrary indexed web pages
+  // (statements.py) and committee/employer/occupation are FEC free-text
+  // fields — none of that is sanitized upstream. A crafted value starting
+  // with =, +, -, @, tab, or CR is interpreted as a formula by
+  // Excel/LibreOffice/Sheets on open (e.g. `=HYPERLINK(...)`, a DDE
+  // payload). Neutralize by prefixing a leading apostrophe, which every
+  // major spreadsheet app treats as "force text" and hides on display.
+  // NOT applied to a value that's already a plain number: this app exports
+  // plenty of legitimate negative figures (refunds, net donor totals), and
+  // forcing "-1500.00" to text would silently change it from a usable
+  // number into a display-only string — a real regression, not a safe one.
+  var _PLAIN_NUMBER_RE = /^[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?$/;
+  var _FORMULA_LEAD_RE = /^[=+\-@\t\r]/;
   function csvCell(v) {
     if (v === null || v === undefined) return "";
     if (Array.isArray(v)) v = v.join("; ");
     if (typeof v === "boolean") v = v ? "true" : "false";
     let s = String(v);
+    if (_FORMULA_LEAD_RE.test(s) && !_PLAIN_NUMBER_RE.test(s)) {
+      s = "'" + s;
+    }
     if (s.indexOf('"') !== -1 || s.indexOf(",") !== -1 ||
         s.indexOf("\n") !== -1 || s.indexOf("\r") !== -1) {
       s = '"' + s.replace(/"/g, '""') + '"';

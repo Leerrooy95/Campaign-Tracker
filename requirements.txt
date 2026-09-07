@@ -1,8 +1,12 @@
 flask>=3.0
-flask-limiter>=3.5   # optional — app degrades gracefully without it
+flask-limiter>=3.5   # hard dependency — rate limiting is not optional (see
+                     # Security_Recommendations.md; a missing package used to
+                     # silently degrade to no rate limiting at all)
 curl_cffi>=0.6       # browser-TLS: clears api.congress.gov's Cloudflare check AND
                      # lifts the statements page-fetch dating hit rate (both fall
                      # back to urllib without it — degraded, never fatal)
+defusedxml>=0.7      # votes.py: entity-expansion-safe XML parsing for Senate LIS
+                     # vote XML (see Security_Recommendations.md)
 # later, for export.py (six-format reports, lifted from Friction_Breaker):
 # python-docx>=1.1
 # reportlab>=4.0
