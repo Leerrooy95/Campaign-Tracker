@@ -106,6 +106,33 @@ that described behavior the code never had.
   to `.gitignore` along with `tests/live_runs/` so operator run artifacts
   can't creep back in.
 
+### Fixed (post-merge)
+
+- **`docker/searxng/settings.yml` — SearXNG's free `brave` engine (an HTML
+  scraper, not the paid Brave Search API this project already avoids) is
+  disabled by default; it was silently starving statement gathering.** A
+  real run against a live candidate returned "0 statements gathered" across
+  several consecutive searches. Manually curling
+  `/search?q=test&format=json` and reading the response's
+  `unresponsive_engines` key showed `["brave", "too many requests"]` —
+  Brave's anti-bot defense blocks this scraper quickly even from a single
+  low-volume self-hosted instance issuing statements.py's ~10 sequential
+  per-candidate queries, and a blocked engine can eat the per-engine timeout
+  budget on every query rather than failing cleanly. Fixed with an
+  `engines: [{name: brave, disabled: true}]` override under the file's
+  existing `use_default_settings: true` — verified against SearXNG's own
+  `settings_loader.py` merge logic (matches by engine `name`, only the
+  listed field changes, every other engine keeps its shipped default) and
+  against `preferences.py` (a settings-level `disabled` governs the DEFAULT
+  engine set a cookie-less request gets, so it applies to statements.py's
+  JSON calls the same as a browser hitting the UI — not a per-session
+  toggle that would miss the app's stateless requests). `docker/searxng/README.md`
+  gains a diagnostic step (pipe the same curl through
+  `python3 -m json.tool` and check `unresponsive_engines`) and instructions
+  for disabling another engine the same way if `duckduckgo` or `startpage` —
+  both already flagged in CLAUDE.md as occasionally rate-limited alongside
+  brave — start showing the same pattern.
+
 ## [1.2.1] — 2026-09-07
 
 Driven by a 5-candidate live rate-limit/completeness audit (Thomas
