@@ -190,6 +190,36 @@ check("composition null traceable/dark survives to row",
   byKey.composition.rows[0][9] === null && byKey.composition.rows[0][10] === null);
 check("file prefix from name + cycle", CT.filePrefix(result) === "ossoff_t_jonathan_2026");
 
+// ── demo runs must stay identifiable after export ─────────────────────────
+// A demo export used to be indistinguishable from a real one once the files
+// were on disk: no run-level flag anywhere in the JSON, and the composition
+// table was silently DROPPED when its rows carried "_demo" (a missing table,
+// not a disclosed one). Now the run flag rides in result.demo, the filename
+// says so, and the table exports like any other.
+const demoResult = { ...result, demo: true };
+check("demo run gets a demo_ filename prefix",
+  CT.filePrefix(demoResult) === "demo_ossoff_t_jonathan_2026");
+check("a real run's prefix is unchanged (no stray prefix)",
+  CT.filePrefix(result) === "ossoff_t_jonathan_2026");
+const demoTables = CT.buildTables({
+  demo: true,
+  track_a_composition: [{ cycle: 2026, receipts: 10e6, individual_itemized: 7.4e6,
+                          _demo: true }],
+});
+// The real app.py demo fixture for track_a_outside is a bare inline dict
+// ({"_demo": True, "support_total": ..., "oppose_total": ...}) with NO
+// "cycle" key — filePrefix must fall back to the top-level result.cycle
+// (always present, real or demo) or a demo export's filename silently loses
+// its "_<cycle>" suffix (flagged in PR #3 review).
+check("demo run's filename still gets a cycle suffix when track_a_outside has none",
+  CT.filePrefix({
+    demo: true, candidate_name: "OSSOFF, T. JONATHAN (demo)", cycle: 2026,
+    track_a_outside: { _demo: true, support_total: 4.1e6, oppose_total: 1.2e6 },
+  }) === "demo_ossoff_t_jonathan_demo_2026");
+check("demo composition rows are exported, not silently dropped",
+  demoTables.some(t => t.key === "composition") &&
+  demoTables.find(t => t.key === "composition").rows.length === 1);
+
 // ── build the ZIP and write everything out for the Python verifier ────────
 const files = tables.map(t => ({
   name: `${CT.filePrefix(result)}_${t.key}.csv`,

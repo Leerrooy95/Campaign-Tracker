@@ -14,10 +14,12 @@ to a report layer, later) — there is no scoring and no correlation verdict:
     cosponsored (Congress.gov), and public statements on money/influence gathered
     by web search (statements.py). Both factual, dated, sourced. No scoring.
 
-THREE ROUTES:
+ROUTES:
   GET  /                     → the single-page frontend
-  POST /search               → spawns a worker, returns {"job_id": ...} immediately
+  POST /candidates           → {name} → the ranked "Did You Mean?" shortlist
+  POST /search               → spawns a worker, returns {"job_id": ..., "demo": ...}
   GET  /status/<job_id>      → returns the live StepLog + result (the poll target)
+  GET  /health               → {"ok": true} liveness, nothing more
 
 RUNTIME MODES:
   - REAL (default in deployment): uses the CREATOR's FEC key (FEC_API_KEY) for
@@ -25,8 +27,15 @@ RUNTIME MODES:
     the shared FEC key is rate-limited, the UI offers an optional field for a
     user to paste their own. No CONGRESS_API_KEY → the record stage is skipped
     and disclosed; the money side still completes.
-  - DEMO (no FEC_API_KEY, or ?demo=1): every stage is simulated with synthetic
-    fixtures so the app runs with zero setup and you can watch the live display.
+  - DEMO: every stage is simulated with synthetic fixtures, so the app runs with
+    zero setup and zero network calls and you can watch the live display. It is
+    triggered by an ABSENT FEC_API_KEY, or by "demo": true in /search's JSON
+    body — NOT by a ?demo=1 query string, which this app has never read (the
+    browser UI has no way to send the body field either, so demo mode can only
+    be forced on a keyed deployment by hand-driving the API). Every demo run is
+    marked at the run level (result["demo"], /status's "demo") and at the row
+    level (each track's "_demo"), so synthetic data stays identifiable after it
+    has been exported and has left the app.
 """
 from __future__ import annotations
 
@@ -50,10 +59,9 @@ import timeline
 import votes
 from steps import StepLog, StepGateError
 
-# flask-limiter is a HARD dependency (Security_Recommendations.md MEDIUM —
-# it used to degrade to a no-op decorator when the package was missing, with
-# no startup warning, silently running the app with NO rate limiting at
-# all). It's pinned in requirements.txt; import failure here is a real
+# flask-limiter is a HARD dependency (SECURITY.md MEDIUM — it used to degrade
+# to a no-op decorator when the package was missing, with no startup warning,
+# silently running the app with NO rate limiting at all). It's pinned in requirements.txt; import failure here is a real
 # install problem, not something to paper over with a fallback.
 
 
@@ -68,9 +76,9 @@ _JOB_TTL = 1800  # seconds to keep a finished job around for polling/export
 # Every /search spawns its own unbounded threading.Thread plus, inside
 # statements.py's page-fetch pass, an 8-worker ThreadPoolExecutor — with no
 # cap, concurrent submissions pile up threads and memory with no ceiling
-# (Security_Recommendations.md MEDIUM). Bounds RUNNING jobs only — a job that
-# finished and is just sitting in JOBS for polling/export doesn't hold a
-# worker thread, so it doesn't count against the cap.
+# (SECURITY.md MEDIUM). Bounds RUNNING jobs only — a job that finished and is
+# just sitting in JOBS for polling/export doesn't hold a worker thread, so it
+# doesn't count against the cap.
 _MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "8"))
 
 # Both fields below are interpolated UNENCODED into upstream API paths
@@ -87,8 +95,8 @@ _STATE_RE = re.compile(r"^[A-Z]{2}$")                  # USPS state/territory co
 
 
 # ── CSRF defense for POST /candidates and /search ───────────────────────────
-# Security_Recommendations.md MEDIUM: neither POST route carried a CSRF
-# token, and both accepted `request.form` as a fallback when JSON parsing
+# SECURITY.md MEDIUM: neither POST route carried a CSRF token, and both
+# accepted `request.form` as a fallback when JSON parsing
 # failed — which made them reachable by a plain cross-origin HTML <form>
 # POST as a CORS "simple request" (no preflight, no cooperation from the
 # browser needed). There's no session/login system in this app to hang a
@@ -139,7 +147,7 @@ def _json_body_or_none(req) -> dict | None:
     return req.get_json(silent=True)
 
 
-def _new_job() -> str | None:
+def _new_job(demo: bool = False) -> str | None:
     """Create a job, or return None if _MAX_CONCURRENT_JOBS running jobs are
     already active. The check-and-create happens under one lock acquisition
     so two simultaneous requests can't both slip past the cap."""
@@ -154,6 +162,7 @@ def _new_job() -> str | None:
             "error": None,
             "rate_limited": False,
             "done": False,
+            "demo": demo,
             "created": time.time(),
         }
     return job_id
@@ -198,6 +207,44 @@ def _demo_composition() -> list[dict]:
             "incomplete": False, "incomplete_reason": "",
         })
     return out
+
+
+def _mark_demo(obj):
+    """Stamp synthetic data with `_demo: True`, in place, and return it.
+
+    Demo marking used to be inconsistent: track_a_direct/track_a_outside were
+    hand-built inline dicts that already carried "_demo" literally, while
+    composition, record, votes and statements carried nothing at all (the same
+    serializer builds real and demo output for those four), so an exported
+    JSON/CSV that had left the running app had no uniform, machine-checkable
+    way to tell synthetic rows from real ones. The four tracks that lacked a
+    marker are now passed through here; track_a_direct/track_a_outside keep
+    their existing inline "_demo" (nothing to fix there — they never lacked
+    the flag) rather than being rewritten to route through this helper too.
+    Every demo track ends up marked one way or the other, and
+    `result["demo"]` is the authoritative run-level flag regardless. Lists are
+    stamped element-wise (composition is a list of per-cycle dicts)."""
+    if isinstance(obj, list):
+        for item in obj:
+            _mark_demo(item)
+    elif isinstance(obj, dict):
+        obj["_demo"] = True
+    return obj
+
+
+def _statements_backend_note(backend: str) -> str:
+    """The statements step's disclosure, derived from the backend that actually
+    ran rather than from the branch that called it.
+
+    The old demo branch hardcoded "(offline fixtures — set SEARXNG_URL for
+    live)" regardless of what collect_statements did, so in the one state where
+    it did something else — a demo run with SEARXNG_URL set, which fell through
+    to a live search — the visible step log asserted the opposite of what
+    happened. The step log is the tool's self-check (Integrity Rule 6); it
+    cannot be allowed to describe an intention."""
+    if backend == "fixtures":
+        return "(offline fixtures — no network; set SEARXNG_URL and run real for live search)"
+    return f"(LIVE {backend} search — this run touched the network)"
 
 
 def _summarize_direct(groups: list[dict], top_n: int = 25) -> dict:
@@ -292,7 +339,11 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
         ("synthesize",  "Plain-language report (translation layer)"),
     ])
 
-    result: dict = {"candidate": name, "cycle": cycle}
+    # ONE authoritative marker for synthetic data, set before any stage runs.
+    # It rides in `result` -> /status -> the raw JSON pane -> every CSV/ZIP
+    # export, so a file that has left the app still says what it is. The
+    # per-track "_demo" flags below are the same claim at row level.
+    result: dict = {"candidate": name, "cycle": cycle, "demo": demo}
 
     try:
         # ── 1. resolve ──────────────────────────────────────────────────────
@@ -353,9 +404,9 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
                 msg = (f"top {shown} of {n:,} largest itemized donors "
                        f"(campaign total in composition, below){extra}")
                 # A later page failing after retries (sustained rate limiting,
-                # an outage, or a request-construction bug like the one in
-                # Claude_Recommendations.md) means the "largest donors" pull
-                # stopped short of its max_pages cap — that's a real
+                # an outage, or a request-construction bug like the
+                # amount-sorted cursor one fixed in 1.2.1) means the "largest
+                # donors" pull stopped short of its max_pages cap — a real
                 # incompleteness, not the deliberate cap, and must warn rather
                 # than ok, mirroring the sched_e step's incomplete check above.
                 if result["track_a_direct"].get("truncated"):
@@ -409,7 +460,7 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
             log.require("sched_a", allow_warn=True)
             if demo:
                 time.sleep(0.5)
-                result["track_a_composition"] = _demo_composition()
+                result["track_a_composition"] = _mark_demo(_demo_composition())
                 s.ok("5 cycles: small-dollar share falling, PAC + outside rising (demo)")
             else:
                 fcs = fec.funding_by_cycle(result.get("candidate_id"), fec_key,
@@ -430,7 +481,7 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
             if demo:
                 time.sleep(0.5)
                 rec = congress.demo_record()
-                result["track_b_record"] = congress.record_to_jsonable(rec)
+                result["track_b_record"] = _mark_demo(congress.record_to_jsonable(rec))
                 s.warn(f"{len(rec.actions)} legislative actions, "
                        f"{sum(1 for a in rec.actions if a.money_related)} money-related "
                        f"(demo fixtures)")
@@ -466,7 +517,7 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
             if demo:
                 time.sleep(0.4)
                 vrec = votes.demo_votes()
-                result["track_b_votes"] = votes.record_to_jsonable(vrec)
+                result["track_b_votes"] = _mark_demo(votes.record_to_jsonable(vrec))
                 linked = votes.link_votes_to_record(
                     result["track_b_votes"], result.get("track_b_record") or {})
                 s.warn(f"{len(vrec.votes)} money-related roll calls of "
@@ -522,10 +573,20 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
             office = result.get("office") or ""
             if demo:
                 time.sleep(0.5)
-                ss = statements.collect_statements(search_name, searxng_url="", office=office)  # fixtures
-                result["track_b_statements"] = statements.statements_to_jsonable(ss)
-                s.warn(f"{len(ss.statements)} statements gathered (offline fixtures — "
-                       f"set SEARXNG_URL for live)")
+                # FORCE_OFFLINE (not a bare "") — a bare "" used to fall through
+                # to SEARXNG_URL in the environment, so a demo run on a machine
+                # with SearXNG configured quietly ran a LIVE search and mixed one
+                # real track into an otherwise synthetic result.
+                ss = statements.collect_statements(
+                    search_name, searxng_url=statements.FORCE_OFFLINE, office=office)
+                result["track_b_statements"] = _mark_demo(
+                    statements.statements_to_jsonable(ss))
+                # The step line reports what the collector ACTUALLY did
+                # (ss.backend), never what this branch intended. A disclosure
+                # derived from intent can be wrong; one derived from the run
+                # can only be right (Integrity Rule 6).
+                s.warn(f"{len(ss.statements)} statements gathered "
+                       + _statements_backend_note(ss.backend))
             else:
                 searxng = os.getenv("SEARXNG_URL", "")
                 if not searxng:
@@ -556,6 +617,14 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
                     # as a finding (see statements._own_voice_note).
                     if cov.get("own_voice_note"):
                         notes.append(cov["own_voice_note"])
+                    # Belt and braces on the same rule as the demo branch: the
+                    # line describes the backend that ran, not the one asked
+                    # for. With a non-empty SEARXNG_URL this can't currently
+                    # fall back, and if that ever changes the log says so
+                    # instead of quietly claiming a live search.
+                    if ss.backend != "searxng":
+                        notes.append("collector did not run a live search — "
+                                     + _statements_backend_note(ss.backend))
                     if notes:
                         s.warn(msg + " — caveats: " + "; ".join(notes))
                     else:
@@ -665,8 +734,8 @@ def create_app() -> Flask:
     # proxy sits in front (BEHIND_PROXY=1). Applying ProxyFix unconditionally
     # would let ANY client set X-Forwarded-For and make the rate limiter key
     # on a fake IP — trivially bypassing it. Set this alongside the reverse
-    # proxy Security_Recommendations.md/README.md say to put in front of a
-    # non-loopback (HOST=0.0.0.0) deployment; leave it off for local/loopback
+    # proxy SECURITY.md/README.md say to put in front of a non-loopback
+    # (HOST=0.0.0.0) deployment; leave it off for local/loopback
     # use, where get_remote_address is already the real client IP.
     if os.getenv("BEHIND_PROXY", "0") == "1":
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # type: ignore[method-assign]
@@ -676,11 +745,11 @@ def create_app() -> Flask:
     # /status is polled every 750ms per running job (static/app.js POLL_MS) —
     # a handful of concurrent tabs/jobs is normal, legitimate traffic, so this
     # has to sit well above search_limit while still bounding a client that
-    # polls far beyond what the UI ever would (Security_Recommendations.md
+    # polls far beyond what the UI ever would (SECURITY.md
     # MEDIUM: /status was completely unlimited).
     status_limit = limiter.limit("240 per minute")
 
-    # Security_Recommendations.md MEDIUM: only X-Content-Type-Options and
+    # SECURITY.md MEDIUM: only X-Content-Type-Options and
     # X-Frame-Options were set — no CSP, Referrer-Policy, Permissions-Policy,
     # or HSTS. The audit noted this was a missing DEFENSE-IN-DEPTH layer, not
     # an exploitable hole on its own (every innerHTML sink in static/app.js
@@ -792,7 +861,7 @@ def create_app() -> Flask:
         state = (data.get("state") or "").strip()
 
         # Reject before either value reaches fec.py/congress.py's unencoded
-        # URL interpolation (Security_Recommendations.md, Phase 2). Empty is
+        # URL interpolation (SECURITY.md, Phase 2). Empty is
         # fine (both are optional — a bare-name search never sets them); a
         # non-empty value that doesn't match the real upstream grammar is not.
         if candidate_id and not _CANDIDATE_ID_RE.match(candidate_id):
@@ -800,7 +869,7 @@ def create_app() -> Flask:
         if state and not _STATE_RE.match(state):
             return jsonify({"error": "invalid state"}), 400
 
-        job_id = _new_job()
+        job_id = _new_job(demo)
         if job_id is None:
             return jsonify({
                 "error": f"too many searches running right now (max "
@@ -824,6 +893,10 @@ def create_app() -> Flask:
             "done": job["done"],
             "error": job["error"],
             "rate_limited": job["rate_limited"],   # frontend reveals the key field on this
+            # Synthetic-vs-real, available from the first poll — before
+            # `result` exists — and mirrored inside `result` itself so a saved
+            # export carries it too. One field, one meaning, both places.
+            "demo": job["demo"],
             "result": job["result"],
             "log": job["log"].to_dict(),
         })
@@ -831,7 +904,7 @@ def create_app() -> Flask:
     @app.route("/health")
     def health():
         # `has_fec_key` used to be reported here unconditionally
-        # (Security_Recommendations.md LOW: reconnaissance value — it lets
+        # (SECURITY.md LOW: reconnaissance value — it lets
         # anyone who reaches the port distinguish a real deployment worth
         # targeting from a demo one). Dropped rather than kept: nothing in
         # this app actually consumes it (grep static/app.js — it never has),
@@ -861,7 +934,7 @@ if __name__ == "__main__":
     # for local development with FLASK_DEBUG=1.
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
     # HOST defaults to loopback-only: there is no authentication, authorization,
-    # or TLS anywhere in this app (Security_Recommendations.md HIGH finding),
+    # or TLS anywhere in this app (SECURITY.md HIGH finding),
     # so the default a bare `python3 app.py` / `./run.sh` gives an open-source
     # cloner must be the safe one — reachable only from the machine it runs
     # on. Binding wider (a LAN, a container's 0.0.0.0, a public host) is an
@@ -870,7 +943,7 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "127.0.0.1")
     _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
     # FLASK_DEBUG=1 + a non-loopback HOST is refused outright, not just
-    # warned about (Security_Recommendations.md LOW): the debug default and
+    # warned about (SECURITY.md LOW): the debug default and
     # the bind default are individually safe, but the interactive Werkzeug
     # debugger is arbitrary code execution for anyone who reaches the port —
     # a warning two lines apart from the opt-in is exactly the kind of thing
@@ -888,5 +961,5 @@ if __name__ == "__main__":
         print(f"  authorization, or TLS. Anyone who can reach this address can run jobs")
         print(f"  on your FEC/Congress quota and, if you paste one in, intercept your")
         print(f"  Anthropic key in transit. Put a reverse proxy (TLS + auth) in front")
-        print(f"  before binding beyond your own machine — see Security_Recommendations.md.\n")
+        print(f"  before binding beyond your own machine — see SECURITY.md.\n")
     app.run(host=host, port=port, threaded=True, debug=debug)

@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 3 MEDIUM
+"""Regression test for the SECURITY.md Phase 3 MEDIUM
 finding: statements.py's PRIMARY page-fetch transport (curl_cffi, used when
 installed — which it is for Congress.gov's Cloudflare bypass too) applied
 `_FETCH_MAX_BYTES` as `resp.text[:_FETCH_MAX_BYTES]` — a slice AFTER the

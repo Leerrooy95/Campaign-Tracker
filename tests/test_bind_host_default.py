@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md HIGH finding: the app
+"""Regression test for the SECURITY.md HIGH finding: the app
 bound `0.0.0.0` unconditionally, with no authentication/authorization/TLS —
 so the default an open-source cloner gets by just running `python3 app.py`
 was network-reachable, not loopback-only.

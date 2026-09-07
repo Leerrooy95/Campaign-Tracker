@@ -4,7 +4,7 @@
 # Your keys go in a `.env` file (see `.env.example`), NOT in this script.
 # This file IS tracked in git; `.env` is gitignored on purpose, so a
 # `git add -A` / `git commit -a` can never accidentally publish a live key —
-# see Security_Recommendations.md ("run.sh as the tracked home for live API
+# see SECURITY.md ("run.sh as the tracked home for live API
 # keys"). Earlier versions of this script had you paste keys directly into
 # clearly-marked slots here; if you're updating from one of those, move your
 # values into `.env` the same way.

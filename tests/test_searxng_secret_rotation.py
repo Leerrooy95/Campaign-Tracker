@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md HIGH finding: the
+"""Regression test for the SECURITY.md HIGH finding: the
 SearXNG `secret_key` rotation step was a silent no-op.
 
 BUG — three files disagreed on the placeholder string:

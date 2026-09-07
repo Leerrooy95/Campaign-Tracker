@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md HIGH finding: `run.sh`
+"""Regression test for the SECURITY.md HIGH finding: `run.sh`
 was the documented and only supported home for live FEC_API_KEY /
 CONGRESS_API_KEY values — a file under version control, one `git add -A`
 away from publishing a real credential.

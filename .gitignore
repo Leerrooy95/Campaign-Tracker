@@ -11,7 +11,7 @@ __pycache__/
 # Local environment / secrets. The FEC/Congress/SearXNG values go in .env
 # (copy .env.example -> .env; run.sh sources it automatically) or the shell
 # environment; the Anthropic key is UI-only and never touches disk — see
-# CLAUDE.md and Security_Recommendations.md.
+# CLAUDE.md and SECURITY.md.
 .env
 venv/
 .venv/
@@ -19,3 +19,10 @@ venv/
 # Editor/OS noise.
 .DS_Store
 *.swp
+
+# Operator run artifacts. Saved output from live audit/test runs (real
+# candidates, real keys' results) is not source and has been committed by
+# accident before — see CHANGELOG.md's User_Runs/, _psycache_/ and
+# tests/rate_limit_run/ removals. Test FIXTURES live in tests/fixtures/.
+tests/rate_limit_run/
+tests/live_runs/

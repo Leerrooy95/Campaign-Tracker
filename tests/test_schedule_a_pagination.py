@@ -1,5 +1,5 @@
-"""Regression test for the Schedule A pagination bug in Claude_Recommendations.md
-(2026-09-07 five-candidate live audit).
+"""Regression test for the Schedule A pagination bug found by the
+2026-09-07 five-candidate live audit.
 
 BUG — `fetch_schedule_a` hard-coded the keyset-pagination cursor's secondary
 field as `last_contribution_receipt_date`. That's only the right field name
@@ -65,7 +65,7 @@ def test_amount_sort_cursor():
         if len(requested_urls) == 1:
             # Page 1: FEC's own real response shape for an amount-sorted
             # query — last_indexes carries the AMOUNT key, no date key at all
-            # (this is the exact live shape from Claude_Recommendations.md).
+            # (this is the exact live shape that audit captured).
             body = json.dumps({
                 "results": [_row("A1", 3500.0)],
                 "pagination": {

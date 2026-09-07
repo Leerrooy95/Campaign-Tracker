@@ -1,4 +1,4 @@
-"""Regression test for the Security_Recommendations.md Phase 3 MEDIUM CSRF
+"""Regression test for the SECURITY.md Phase 3 MEDIUM CSRF
 finding: neither `POST /candidates` nor `POST /search` carried a CSRF token,
 and both accepted `request.form` as a fallback when JSON parsing failed —
 which made them reachable by a plain cross-origin HTML <form> POST as a CORS

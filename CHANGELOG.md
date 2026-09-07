@@ -5,11 +5,112 @@ follows [Keep a Changelog](https://keepachangelog.com/) conventions: newest
 release first, changes grouped under **Added / Changed / Fixed**, and every
 entry stated as a fact a reader can verify against the code or a run.
 
+## [Unreleased]
+
+Driven by the 2026-09-07 post-security-update regression audit. The four-phase
+hardening pass itself came back regression-free (full offline suite green, two
+live real-data runs internally consistent, a headless-browser pass with zero
+console/CSP errors), but the audit's demo-mode trace surfaced a real,
+live-reproduced integrity bug that predates that work — plus a set of docs
+that described behavior the code never had.
+
+### Fixed
+
+- **`statements.py` — demo mode ran LIVE web searches whenever `SEARXNG_URL`
+  was set, and the step log said it hadn't.** `collect_statements` resolved
+  its backend with `base = (searxng_url or os.getenv("SEARXNG_URL", ""))`.
+  An empty string is falsy, so `app.py`'s demo branch passing
+  `searxng_url=""` *to force fixtures* fell through to the environment
+  instead. On any machine configured for the statements track — the state
+  this repo's own quick start produces — a demo run made real network calls
+  and returned one live, search-derived statements track sitting inside an
+  otherwise fabricated result (reproduced live against a running instance:
+  five hardcoded Ossoff fixture tracks alongside `backend: "searxng"` and
+  the real typed candidate name). `collect_statements` now branches on
+  `searxng_url is None` and keeps three distinct cases: `None` consults the
+  environment, the new `FORCE_OFFLINE` sentinel forces fixtures no matter
+  what the environment holds, any other string is used as given. `app.py`'s
+  demo branch passes `FORCE_OFFLINE`. Demo mode is now genuinely
+  no-network, as the README and CLAUDE.md have always claimed.
+- **`app.py` — the `statements` step's disclosure described the branch's
+  intent, not the run.** It unconditionally logged "N statements gathered
+  (offline fixtures — set SEARXNG_URL for live)" whenever `demo` was set, so
+  in exactly the state above the visible step log asserted the opposite of
+  what had happened. This is the more serious half: the StepLog is the
+  tool's self-check (Integrity Rule 6, "visible process = self-check"), and
+  a log that can describe an intention checks nothing. The message is now
+  derived from `ss.backend` (`_statements_backend_note`), and the live
+  branch carries the same guard in reverse — if the collector ever fails
+  over to fixtures, the line says so rather than claiming a live search.
+
+### Added
+
+- **One authoritative synthetic-data flag, and uniform row-level markers.**
+  Marking was inconsistent: `track_a_direct`/`track_a_outside` carried
+  `_demo`, composition/record/votes/statements carried nothing (the same
+  serializer builds real and demo output for those), and `/status` returned
+  no `demo` field at all — so an exported JSON/CSV, once it had left the
+  running app, had no reliable machine-checkable way to say whether it was
+  synthetic. Now: `result["demo"]` is set before any stage runs and rides
+  through `/status` into the raw JSON pane and every export; `/status`
+  reports `demo` on its own too, so a poller knows before `result` exists;
+  every demo track is stamped `_demo` via `app._mark_demo`; and demo exports
+  are named `demo_*.csv` / `demo_*.zip`.
+- `tests/test_demo_isolation.py` — pins the three-way fixtures/live decision
+  (including a proof that the old falsy-string idiom really would have gone
+  live), a full demo run through `_run_search` with the search transport
+  monkeypatched to fail loudly if it is ever reached, the backend-derived
+  step message, the per-track markers, and `/status`'s `demo` field.
+  `tests/test_export_js.mjs` gains the demo filename-prefix pins.
+- `SECURITY.md` — a public security document: how to report a vulnerability,
+  the deployment posture (loopback default, no auth/TLS of its own, when
+  `BEHIND_PROXY=1` is safe and when it is a bypass, the debug/bind refusal),
+  the key model, and the closed hardening findings by severity with the test
+  that pins each. Replaces the internal `Security_Recommendations.md`, which
+  was removed before release while 41 references to it stayed behind.
+
+### Changed
+
+- **`static/export.js` — demo composition rows are exported instead of
+  silently dropped.** The table was skipped entirely when its first row
+  carried `_demo`, which left a demo export quietly missing a table — a
+  hidden gap where the project's rules call for a disclosed one. Synthetic
+  data is now disclosed by the `demo_` filename, `result.demo`, and each
+  row's own `_demo` flag, never by omitting data.
+- **Docs corrected to the code, not the other way round.** `?demo=1` never
+  existed: `app.py` has never read `request.args` and `static/app.js` never
+  sends a `demo` field, so demo mode is triggered by an absent `FEC_API_KEY`
+  or by `"demo": true` in `/search`'s JSON body, and the browser UI cannot
+  reach it on a keyed deployment at all. README's endpoint table still
+  described `/health` as reporting "whether a FEC key is configured", which
+  1.2.1 deliberately removed; it is a plain `{"ok": true}`. The demo banner
+  in the UI said "(no FEC key configured)", which is not true of an
+  API-forced demo run; it now describes what the run *is*.
+- **Dead documentation references removed** — 40 to `Security_Recommendations.md`
+  across code comments, tests, the README, CLAUDE.md, `run.sh`,
+  `requirements.txt` and the SearXNG settings file (repointed to the new
+  `SECURITY.md`) and 6 to `Claude_Recommendations.md`
+  (rewritten to name the 2026-09-07 five-candidate live audit itself). The
+  changelog's `Updates/` and `archive_superseded/` paths and CLAUDE.md's
+  `parked/` file-map row are marked as living in the operator's working
+  copy, not this repository. CLAUDE.md also carried a stale claim that the
+  statement classifier is "hardcoded for Ossoff … not yet done", which
+  contradicted its own file map — `build_candidate_context` generalized it.
+
+### Removed
+
+- `tests/rate_limit_run/` — 2.5 MB of saved output from the 5-candidate
+  live rate-limit audit (plus a stray `template` placeholder), tracked in
+  error the same way `User_Runs/` and `_psycache_/` were. Nothing imports
+  it; the fixtures the tests actually use live in `tests/fixtures/`. Added
+  to `.gitignore` along with `tests/live_runs/` so operator run artifacts
+  can't creep back in.
+
 ## [1.2.1] — 2026-09-07
 
-Driven by `Claude_Recommendations.md` — a 5-candidate live rate-limit/
-completeness audit (Thomas Massie, Ed Gallrein, Steve Womack, Lauren
-Boebert, Mike Collins) run one at a time through the real two-phase
+Driven by a 5-candidate live rate-limit/completeness audit (Thomas
+Massie, Ed Gallrein, Steve Womack, Lauren Boebert, Mike Collins) run
+one at a time through the real two-phase
 resolve flow. No 429s occurred (`X-RateLimit-Remaining` never dropped
 below 100/120), but the audit surfaced a 100%-reproducible silent-data-loss
 bug in Schedule A pagination — not a rate-limit problem — plus a gap in how
@@ -142,10 +243,10 @@ change was driven by a real run's output (the repo's convention — e.g.
 
 Two targeted improvements driven by Run 20 — the first run against a House
 member (Thomas Massie, KY-04) and the largest legislative record the tool has
-processed (966 actions). Contributed as an Opus 4.8 patch set
-(`Updates/`), reviewed, verified against the real Run-20 export, and
-integrated; the design message rides in
-`archive_superseded/Opus_4.8_Message.md`.
+processed (966 actions). Contributed as an Opus 4.8 patch set,
+reviewed, verified against the real Run-20 export, and integrated (the
+patch set and its design notes stayed in the operator's working copy;
+only the integrated result ships here).
 
 ### Fixed
 
