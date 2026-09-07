@@ -135,6 +135,8 @@ def _summarize_direct(groups: list[dict], top_n: int = 25) -> dict:
     memo_skipped = 0
     refunds_applied = 0
     refund_total = 0.0
+    any_truncated = False
+    truncated_reasons: list[str] = []
     for g in groups:
         pulled_total += g.get("total_raised", 0) or 0
         all_donors.extend(g.get("donors", []))
@@ -142,6 +144,11 @@ def _summarize_direct(groups: list[dict], top_n: int = 25) -> dict:
         memo_skipped += g.get("memo_skipped", 0) or 0
         refunds_applied += g.get("refunds_applied", 0) or 0
         refund_total += g.get("refund_total", 0) or 0
+        if g.get("truncated"):
+            any_truncated = True
+            reason = g.get("truncated_reason") or ""
+            if reason:
+                truncated_reasons.append(reason)
     top = sorted(all_donors, key=lambda d: d.get("total", 0) or 0, reverse=True)[:top_n]
     all_txns.sort(key=lambda t: t.get("amount", 0) or 0, reverse=True)   # largest-first
     # Bound the retained rows: the pull is already page-capped and largest-first,
@@ -173,6 +180,12 @@ def _summarize_direct(groups: list[dict], top_n: int = 25) -> dict:
         "memo_skipped": memo_skipped,
         "refunds_applied": refunds_applied,
         "refund_total": round(refund_total, 2),
+        # Aggregated across committees, mirroring how search_fec_candidate
+        # already aggregates any_truncated/truncated_reasons per candidate —
+        # a truncated pull on ANY committee must not be dropped here, or the
+        # sched_a step below has no way to know the pull was incomplete.
+        "truncated": any_truncated,
+        "truncated_reason": "; ".join(truncated_reasons),
     }
 
 
@@ -257,8 +270,19 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
                     adj.append(f"{result['track_a_direct']['refunds_applied']} refund(s) "
                                f"netted (${abs(result['track_a_direct']['refund_total']):,.0f})")
                 extra = f" — {', '.join(adj)}" if adj else ""
-                s.ok(f"top {shown} of {n:,} largest itemized donors "
-                     f"(campaign total in composition, below){extra}")
+                msg = (f"top {shown} of {n:,} largest itemized donors "
+                       f"(campaign total in composition, below){extra}")
+                # A later page failing after retries (sustained rate limiting,
+                # an outage, or a request-construction bug like the one in
+                # Claude_Recommendations.md) means the "largest donors" pull
+                # stopped short of its max_pages cap — that's a real
+                # incompleteness, not the deliberate cap, and must warn rather
+                # than ok, mirroring the sched_e step's incomplete check above.
+                if result["track_a_direct"].get("truncated"):
+                    reason = result["track_a_direct"].get("truncated_reason") or ""
+                    s.warn(msg + f" — pull stopped early: {reason}")
+                else:
+                    s.ok(msg)
 
         # ── 3. Schedule E — outside spending (Pipe 2) ───────────────────────
         with log.step("sched_e") as s:
@@ -297,7 +321,12 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
         # ── 4. per-cycle funding composition (factual Track A) ──────────────
         cycles = _default_cycles()
         with log.step("composition") as s:
-            log.require("sched_a")               # composition needs the money pulls
+            # allow_warn=True: sched_a warns (rather than fails) when the
+            # capped donor pull was truncated — composition doesn't consume
+            # that capped list (it re-pulls totals from FEC's own /totals),
+            # so a disclosed-but-partial sched_a must not halt everything
+            # downstream, same as sched_e's incomplete flag never does.
+            log.require("sched_a", allow_warn=True)
             if demo:
                 time.sleep(0.5)
                 result["track_a_composition"] = _demo_composition()

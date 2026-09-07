@@ -1,0 +1,20 @@
+# Python bytecode caches — never belong in version control. A stray
+# committed __pycache__ (as _psycache_/) shipped in the open-source repo
+# until this was added; see CHANGELOG.md.
+__pycache__/
+*.pyc
+*.pyo
+
+# synthesis.py's per-candidate report cache (generated, not source).
+.synthesis_cache/
+
+# Local environment / secrets. The FEC/Congress keys go in run.sh (not
+# committed as filled-in) or the shell environment; the Anthropic key is
+# UI-only and never touches disk — see CLAUDE.md.
+.env
+venv/
+.venv/
+
+# Editor/OS noise.
+.DS_Store
+*.swp
