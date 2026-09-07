@@ -126,6 +126,17 @@ section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px;
 /* when printing/saving to PDF, never dump the raw JSON — only the report prints */
 @media print { #raw-toggle { display: none !important; } }
 
+/* Legend swatch colors — classes, not inline style="" (CSP-compatible: a
+   strict style-src with no 'unsafe-inline' still applies these; the chart
+   builders in app.js set these class names instead of inline style
+   attributes on the same fixed, small color set they always used). */
+.c-green  { background: #4b9e5f; }
+.c-red    { background: #c0483f; }
+.c-purple { background: #8a6fd1; }
+.c-blue   { background: #5b9dff; }
+.c-gold   { background: #e0a83b; }
+.c-orange { background: #d98c2b; }
+
 /* money composition chart (inline SVG) */
 #money-panel .chart svg { width: 100%; height: auto; max-width: 680px; display: block; }
 #money-panel .chart .grid { stroke: #2a2e37; stroke-width: 1; }

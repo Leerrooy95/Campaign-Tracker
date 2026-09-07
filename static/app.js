@@ -414,8 +414,8 @@ function renderTrendPanel(result) {
   $("trend-chart").innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Outside spending for and against, by cycle">${grid}${bars}${labels}</svg>`;
   $("trend-legend").innerHTML =
-    `<span><i style="background:${OP}"></i>Spent against</span>` +
-    `<span><i style="background:${SP}"></i>Spent for</span>`;
+    `<span><i class="c-red"></i>Spent against</span>` +
+    `<span><i class="c-green"></i>Spent for</span>`;
   const anyIncomplete = rows.some(r => r.incomplete);
   $("trend-note").textContent =
     "Independent expenditures (Schedule E) per two-year cycle. Prior-cycle totals " +
@@ -518,10 +518,10 @@ function renderTimelinePanel(result) {
   $("timeline-chart").innerHTML =
     `<svg width="${W}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Side-by-side timeline: money, record, and statements by month">${svg}</svg>`;
   $("timeline-legend").innerHTML =
-    `<span><i style="background:${COLORS.money}"></i>Money (spenders + top donors)</span>` +
-    `<span><i style="background:${COLORS.record}"></i>Record — bill</span>` +
-    `<span><i class="diamond" style="background:${COLORS.record}"></i>Record — roll-call vote</span>` +
-    `<span><i style="background:${COLORS.statement}"></i>Statement (own voice)</span>`;
+    `<span><i class="c-gold"></i>Money (spenders + top donors)</span>` +
+    `<span><i class="c-blue"></i>Record — bill</span>` +
+    `<span><i class="diamond c-blue"></i>Record — roll-call vote</span>` +
+    `<span><i class="c-purple"></i>Statement (own voice)</span>`;
   const extras = [];
   if (tl.year_only && tl.year_only.length) extras.push(`${tl.year_only.length} year-only statement(s) not placed (no exact date)`);
   if (tl.undated_count) extras.push(`${tl.undated_count} undated item(s) counted, not placed`);
@@ -652,9 +652,9 @@ function renderMoneyPanel(result) {
   $("money-chart").innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Funding composition by cycle">${grid}${bars}${labels}</svg>`;
   $("money-legend").innerHTML =
-    `<span><i style="background:${colors.small}"></i>Small-dollar (unitemized)</span>` +
-    `<span><i style="background:${colors.large}"></i>Large-donor (itemized)</span>` +
-    `<span><i style="background:${colors.pac}"></i>PAC</span>`;
+    `<span><i class="c-green"></i>Small-dollar (unitemized)</span>` +
+    `<span><i class="c-orange"></i>Large-donor (itemized)</span>` +
+    `<span><i class="c-purple"></i>PAC</span>`;
   panel.hidden = false;
 }
 

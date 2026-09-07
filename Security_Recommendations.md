@@ -212,61 +212,139 @@ the fix so it can't silently regress.
       the one still-failing test (`test_export_zip.py`, a Node-step
       prerequisite) is pre-existing and unrelated to this phase.
 
-### Phase 3 — MEDIUM: defense-in-depth and resource limits
+### Phase 3 — MEDIUM: defense-in-depth and resource limits ✅ DONE
 
-- [ ] **Neutralize CSV formula injection** in `static/export.js:csvCell` —
-      prefix a leading `=`, `+`, `-`, `@`, tab, or CR in any cell value with a
-      `'` (or wrap per the OWASP CSV-injection guidance) before RFC-4180
-      quoting. Check this doesn't corrupt legitimate values that start with
-      those characters (e.g. a negative dollar figure in a transactions
-      export) — the prefix should be visually inert when opened, not change
-      the underlying number.
-- [ ] **Mark untrusted data as untrusted in the synthesis prompt**
-      (`synthesis.py:build_digest` → the model call). Add explicit delimiting/
-      framing around statement excerpts sourced from the open web — e.g. wrap
-      them in a clearly-labeled block with an instruction that the enclosed
-      text is data, never instructions, mirroring the existing "PROVIDED DATA
-      ONLY" framing. This is prompt-hardening, not a code guarantee — the
-      real backstop stays `reconcile.py`; don't let this item substitute for
-      it. Re-run a couple of cached vs. fresh synthesis calls to confirm the
-      report's prose quality doesn't degrade from the added framing.
-- [ ] **Make `flask-limiter` a hard dependency**, not an optional degrade-to-
-      no-op — add it to `requirements.txt` if it isn't pinned there, and fail
-      startup loudly (or at least log a clear warning) if it's missing rather
-      than silently disabling rate limiting. Add `ProxyFix` so `key_func`
-      reads the real client IP behind a reverse proxy instead of collapsing
-      every client onto the proxy's address. Extend limits to `/status` and
-      confirm normal polling (the frontend's live `/status` loop) doesn't get
-      throttled by whatever limit is chosen.
-- [ ] **Cap concurrent jobs.** Add a bounded queue or a simple semaphore around
-      job creation in `app.py` so an unbounded `threading.Thread` isn't
-      spawned per `/search`, and confirm `_sweep_old_jobs()` still runs
-      predictably under load. Verify a normal multi-tab research session (a
-      few concurrent searches) still works after the cap is added.
-- [ ] **Fix the `curl_cffi` read-bound bypass** — `statements.py`'s primary
-      transport downloads the full response before slicing to
-      `_FETCH_MAX_BYTES`; switch to `curl_cffi`'s streaming mode (or an
-      explicit content-length check) so the 256 KB cap holds on the path
-      that's actually used in production, matching what the `urllib` fallback
-      already does correctly.
-- [ ] **Add CSRF protection** on `/search` and `/candidates` — a same-site
-      cookie flag plus a simple per-session token is enough given there's no
-      auth system yet; reject `request.form` fallback parsing if it doesn't
-      carry the token. Confirm the frontend (`static/app.js`) is updated to
-      send whatever token mechanism is added, or normal searches from the
-      bundled UI will start failing.
-- [ ] **Add missing security headers** — `Content-Security-Policy`,
-      `Referrer-Policy`, `Permissions-Policy`, and HSTS (once TLS is in front
-      of the app) alongside the existing `X-Content-Type-Options` /
-      `X-Frame-Options`. Test the CSP against the actual page — inline
-      `<script>`/`<style>` in `templates/index.html` will need either a nonce
-      or to move into `static/`, so check the page still renders and all four
-      charts + the swimlane still draw before calling this done.
-- [ ] **Validate `SEARXNG_URL`** the same way as the page-fetch guard (Phase 1)
-      if/when it ever becomes request-scoped rather than operator/env-only —
-      not urgent while it's env-only, but worth a one-line comment in
-      `statements.py` pointing future editors at `_is_safe_url()` so this
-      doesn't get reintroduced as a live SSRF later.
+- [x] **Neutralize CSV formula injection** in `static/export.js:csvCell` — a
+      leading `=`, `+`, `-`, `@`, tab, or CR now gets a neutralizing leading
+      apostrophe before RFC-4180 quoting, UNLESS the whole value is a plain
+      number (`-?\d+(\.\d+)?` etc., optionally scientific notation) — the
+      exact regression the checklist flagged (a negative dollar figure like
+      refunds or net donor totals must stay a real number, not become
+      display-only text). Verified with real Excel/DDE-style payloads
+      (`=HYPERLINK(...)`, `+1+1`, `@SUM(...)`, a `cmd|'...'!A1` DDE shape, a
+      leading-tab and leading-CR variant) alongside plain negative/positive
+      numbers, ordinary text, and values that need BOTH neutralizing and
+      RFC-4180 quoting at once.
+- [x] **Mark untrusted data as untrusted in the synthesis prompt**
+      (`synthesis.py`). `SYSTEM_PROMPT` gained an explicit "UNTRUSTED
+      CONTENT WARNING" naming the two concrete sources (statement excerpts
+      from arbitrary indexed web pages; FEC free-text donor/committee
+      fields) and stating plainly that JSON string values are data to
+      restate/quote, never instructions — even one shaped like "ignore
+      previous instructions." `USER_PROMPT_TEMPLATE` now wraps the JSON
+      digest in explicit `<<<BEGIN_CANDIDATE_JSON>>>`/`<<<END_CANDIDATE_JSON>>>`
+      markers with the warning restated right next to the data. This is
+      prompt-hardening, not a code guarantee — `reconcile.py` remains the
+      real backstop and is unchanged. Verified structurally (the framing
+      actually reaches the prompt, the delimiters actually bracket `{data}`)
+      and confirmed a realistic injection-shaped payload crafted into a
+      statement excerpt survives byte-for-byte inside the markers — i.e.
+      the defense is framing the model reads, not silent mangling that
+      would corrupt a legitimate excerpt containing alarming-sounding text.
+- [x] **Made `flask-limiter` a hard dependency** — the old
+      try/except-degrade-to-no-op-decorator is gone; it's a plain top-level
+      import now, so a broken install fails loudly at startup instead of
+      silently running with zero rate limiting.  Added `ProxyFix`, but
+      **opt-in only** via `BEHIND_PROXY=1` — applying it unconditionally
+      would let any direct client spoof `X-Forwarded-For` and make the
+      limiter key on a fake IP, which is worse than not having ProxyFix at
+      all. Extended a "240 per minute" limit to `/status/<job_id>`
+      (previously unlimited) — sized well above the frontend's 750ms poll
+      cadence for a normal handful of concurrent jobs; confirmed by burst-
+      testing both the new `/status` cap and the pre-existing `/search`
+      20/min cap against the real Flask app until each actually tripped.
+- [x] **Capped concurrent jobs.** `_new_job()` now refuses to create a job
+      (`POST /search` returns 429) once `MAX_CONCURRENT_JOBS` (default `8`,
+      env-configurable) RUNNING jobs already exist — check-and-create happen
+      under one lock acquisition so two simultaneous requests can't both
+      slip past it. A finished job sitting in `JOBS` for polling/export
+      doesn't count against the cap (only `done == False` jobs do), and
+      `_sweep_old_jobs()` is untouched — it still reaps by TTL regardless of
+      the new cap. Verified end-to-end through the real route: at the cap,
+      `POST /search` returns 429 and spawns no new worker thread; a slot
+      freeing up (a job finishing) immediately allows the next request
+      through.
+- [x] **Fixed the `curl_cffi` read-bound bypass.** The primary transport now
+      requests with `stream=True` and reads via `iter_content()` in 8 KB
+      chunks, breaking (and closing the connection) the instant
+      `_FETCH_MAX_BYTES` is reached — the cap is enforced AT THE SOCKET now,
+      not by slicing an already-fully-downloaded string. Verified with a
+      REAL local HTTP server that slow-drips a 16 MB response (5ms per
+      chunk, so the client has many chances to bail early if it's actually
+      streaming) and independently counts the bytes the SERVER wrote to the
+      socket: before the fix this ran to the full ~16 MB (reproduced live
+      during this work), after the fix the server sees only ~279 KB before
+      the connection closes. Also confirmed the redirect-handling logic
+      (Phase 1's SSRF fix) still works correctly against a real 302
+      response under `stream=True`.
+- [x] **Added CSRF protection** on `/search` and `/candidates`. This app has
+      no login/session system to hang a per-session token off of, so instead
+      of adding one, the fix closes the SAME vector the audit named the way
+      OWASP's CSRF cheat sheet documents for a no-session JSON API: (1) the
+      `request.form` fallback is gone — both routes now require a real
+      `application/json` body, which a native HTML `<form>` POST can never
+      send (not one of the three CORS "simple" content types), so the
+      classic no-JS CSRF vector is rejected outright, and a cross-origin
+      `fetch()`/XHR trying to fake it is stopped by the browser's CORS
+      preflight (this app sets no `Access-Control-Allow-Origin`); (2)
+      defense in depth — `Origin` (falling back to `Referer`) is checked
+      against the request's own `Host` when either header is present.
+      `static/app.js` already sent `Content-Type: application/json` on both
+      routes, so the legitimate frontend needed no changes at all. Verified
+      by simulating both concrete attack shapes (a classic form-urlencoded
+      POST; a cross-origin JSON POST with a mismatched `Origin`) against the
+      real Flask app, alongside the legitimate same-origin flow (with and
+      without an `Origin` header, matching what a real browser `fetch()`
+      from the app's own page sends) still succeeding.
+- [x] **Added missing security headers** — `Content-Security-Policy` (no
+      `unsafe-inline`/`unsafe-eval` anywhere), `Referrer-Policy: no-referrer`,
+      `Permissions-Policy` (denies geolocation/microphone/camera/payment/usb),
+      and a conditional `Strict-Transport-Security` that only fires when
+      `request.is_secure` (true once `BEHIND_PROXY=1`'s `ProxyFix` reflects a
+      real `X-Forwarded-Proto: https` — HSTS is meaningless, and browsers
+      ignore it, over plain HTTP). The one blocker the checklist called out
+      — inline `style="..."` in `static/app.js` (nine legend-swatch color
+      attributes, injected via `innerHTML`) — was fixed at the root: those
+      fixed, small color literals became `.c-green`/`.c-red`/`.c-purple`/
+      `.c-blue`/`.c-gold`/`.c-orange` utility classes in `static/app.css`,
+      so the CSP needs no `unsafe-inline` carve-out at all (there were no
+      inline `<script>`/`<style>` blocks in `templates/index.html` to begin
+      with — only the JS-injected attributes). **Verified live in a real
+      headless browser** (Playwright + the pre-installed Chromium): loaded
+      the page, ran a full demo search through the "Did You Mean?" picker,
+      and confirmed (a) the CSP header is present and exactly as configured,
+      (b) **zero** CSP violation console messages, (c) all 9 legend swatches
+      rendered with their real background colors (proving the class-based
+      swatch fix actually works under a `style-src` with no
+      `unsafe-inline`), and (d) all 3 chart SVGs (composition, outside-
+      spending trend, timeline swimlane) rendered with real content. A fast
+      header-shape/gating unit test covers the parts a browser isn't needed
+      for (headers present and correctly shaped, HSTS on/off gating, no
+      inline `style=` left anywhere in the frontend source).
+- [x] **`SEARXNG_URL` pointer comment added** — `statements.py`'s
+      `_searxng_search` now explicitly notes it's operator/env-only today
+      (not a live SSRF sink), and points future editors at `_is_safe_url()`
+      — the guard Phase 1 built for the page-fetch tier — should this value
+      ever become request-scoped.
+- [x] **Regression tests for this phase** —
+      `tests/test_csv_formula_injection.mjs` (Node, dangerous-shape
+      neutralization + plain-number preservation + combined quoting, run via
+      `tests/run_export_tests.sh` or standalone),
+      `tests/test_prompt_injection_guard.py` (system-prompt framing,
+      delimiter placement, verbatim payload survival inside the markers),
+      `tests/test_rate_limiting.py` (hard-dependency structural checks,
+      `ProxyFix` opt-in gating, real burst tests tripping both the
+      `/status` and `/search` limits), `tests/test_job_concurrency_cap.py`
+      (unit-level cap semantics + real-route 429 behavior + thread-spawn
+      proof), `tests/test_page_fetch_streaming.py` (real slow-drip local
+      HTTP server, server-side byte-count proof the transfer stops early),
+      `tests/test_csrf_protection.py` (both attack shapes rejected, both
+      legitimate shapes accepted, `_is_same_origin` unit checks), and
+      `tests/test_security_headers.py` (all headers present/shaped/gated
+      correctly, no inline `style=` remains, swatch classes exist — plus
+      the separate live-Playwright verification described above, not
+      automated in this suite). Full existing suite (`tests/test_*.py` +
+      the Node export tests) re-run clean after every change in this phase.
 
 ### Phase 4 — LOW / INFORMATIONAL: cheap wins before release
 

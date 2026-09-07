@@ -34,9 +34,13 @@ import os
 import re
 import threading
 import time
+import urllib.parse
 import uuid
 
 from flask import Flask, jsonify, render_template, request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import fec
 import congress
@@ -46,14 +50,11 @@ import timeline
 import votes
 from steps import StepLog, StepGateError
 
-# flask-limiter is optional — mirror your other apps: rate-limit if present,
-# degrade gracefully if not.
-try:
-    from flask_limiter import Limiter
-    from flask_limiter.util import get_remote_address
-    _HAS_LIMITER = True
-except ImportError:  # pragma: no cover
-    _HAS_LIMITER = False
+# flask-limiter is a HARD dependency (Security_Recommendations.md MEDIUM —
+# it used to degrade to a no-op decorator when the package was missing, with
+# no startup warning, silently running the app with NO rate limiting at
+# all). It's pinned in requirements.txt; import failure here is a real
+# install problem, not something to paper over with a fallback.
 
 
 # ── job registry ────────────────────────────────────────────────────────────
@@ -64,6 +65,13 @@ except ImportError:  # pragma: no cover
 JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
 _JOB_TTL = 1800  # seconds to keep a finished job around for polling/export
+# Every /search spawns its own unbounded threading.Thread plus, inside
+# statements.py's page-fetch pass, an 8-worker ThreadPoolExecutor — with no
+# cap, concurrent submissions pile up threads and memory with no ceiling
+# (Security_Recommendations.md MEDIUM). Bounds RUNNING jobs only — a job that
+# finished and is just sitting in JOBS for polling/export doesn't hold a
+# worker thread, so it doesn't count against the cap.
+_MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "8"))
 
 # Both fields below are interpolated UNENCODED into upstream API paths
 # (fec.py's candidate_id -> /candidate/{id}/totals/, congress.py's state ->
@@ -78,9 +86,68 @@ _CANDIDATE_ID_RE = re.compile(r"^[HSP][0-9A-Z]{8}$")   # FEC's own candidate_id 
 _STATE_RE = re.compile(r"^[A-Z]{2}$")                  # USPS state/territory code
 
 
-def _new_job() -> str:
+# ── CSRF defense for POST /candidates and /search ───────────────────────────
+# Security_Recommendations.md MEDIUM: neither POST route carried a CSRF
+# token, and both accepted `request.form` as a fallback when JSON parsing
+# failed — which made them reachable by a plain cross-origin HTML <form>
+# POST as a CORS "simple request" (no preflight, no cooperation from the
+# browser needed). There's no session/login system in this app to hang a
+# per-session token off of, so instead of adding one, this closes the SAME
+# vector the audit named, the way OWASP's CSRF cheat sheet documents for a
+# no-session JSON API:
+#   1. Require a real `application/json` body (drop the request.form
+#      fallback). A native HTML <form> POST can never send that
+#      Content-Type — it's one of the three CORS "simple" content types
+#      (x-www-form-urlencoded / multipart/form-data / text/plain), and
+#      application/json isn't among them — so a bare cross-site <form>
+#      submission is rejected outright, and a cross-origin fetch()/XHR
+#      trying to fake it gets stopped by the browser's CORS preflight
+#      before it ever reaches this server (this app sets no
+#      Access-Control-Allow-Origin, so the preflight is refused).
+#   2. Defense in depth: verify Origin (falling back to Referer) matches
+#      this request's own Host when either header is present — a same-
+#      origin fetch() always sends a matching Origin, so this costs the
+#      legitimate frontend nothing.
+# static/app.js already sends `Content-Type: application/json` on both
+# routes, so neither change touches the legitimate flow.
+def _is_same_origin(req) -> bool:
+    """True unless a present Origin/Referer names a different host than this
+    request's own Host header. Absent both (a non-browser client, or an
+    older one) is treated as pass — this guards against BROWSER-DRIVEN
+    cross-origin requests specifically; those always carry Origin."""
+    host = req.headers.get("Host", "")
+    origin = req.headers.get("Origin")
+    if origin:
+        try:
+            return urllib.parse.urlsplit(origin).netloc == host
+        except ValueError:
+            return False
+    referer = req.headers.get("Referer")
+    if referer:
+        try:
+            return urllib.parse.urlsplit(referer).netloc == host
+        except ValueError:
+            return False
+    return True
+
+
+def _json_body_or_none(req) -> dict | None:
+    """Strict JSON body — no request.form fallback (see the CSRF note
+    above). None means "reject with 400", not "treat as empty"."""
+    if not req.is_json:
+        return None
+    return req.get_json(silent=True)
+
+
+def _new_job() -> str | None:
+    """Create a job, or return None if _MAX_CONCURRENT_JOBS running jobs are
+    already active. The check-and-create happens under one lock acquisition
+    so two simultaneous requests can't both slip past the cap."""
     job_id = uuid.uuid4().hex
     with _JOBS_LOCK:
+        active = sum(1 for v in JOBS.values() if not v["done"])
+        if active >= _MAX_CONCURRENT_JOBS:
+            return None
         JOBS[job_id] = {
             "log": StepLog(),
             "result": None,
@@ -594,18 +661,64 @@ def _run_search(job_id: str, name: str, fec_key: str, demo: bool,
 def create_app() -> Flask:
     app = Flask(__name__)
 
-    if _HAS_LIMITER:
-        limiter = Limiter(key_func=get_remote_address, app=app,
-                          default_limits=[])
-        search_limit = limiter.limit("20 per minute")
-    else:
-        def search_limit(f):  # no-op decorator
-            return f
+    # Trust X-Forwarded-* headers ONLY when explicitly told a real reverse
+    # proxy sits in front (BEHIND_PROXY=1). Applying ProxyFix unconditionally
+    # would let ANY client set X-Forwarded-For and make the rate limiter key
+    # on a fake IP — trivially bypassing it. Set this alongside the reverse
+    # proxy Security_Recommendations.md/README.md say to put in front of a
+    # non-loopback (HOST=0.0.0.0) deployment; leave it off for local/loopback
+    # use, where get_remote_address is already the real client IP.
+    if os.getenv("BEHIND_PROXY", "0") == "1":
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # type: ignore[method-assign]
+
+    limiter = Limiter(key_func=get_remote_address, app=app, default_limits=[])
+    search_limit = limiter.limit("20 per minute")
+    # /status is polled every 750ms per running job (static/app.js POLL_MS) —
+    # a handful of concurrent tabs/jobs is normal, legitimate traffic, so this
+    # has to sit well above search_limit while still bounding a client that
+    # polls far beyond what the UI ever would (Security_Recommendations.md
+    # MEDIUM: /status was completely unlimited).
+    status_limit = limiter.limit("240 per minute")
+
+    # Security_Recommendations.md MEDIUM: only X-Content-Type-Options and
+    # X-Frame-Options were set — no CSP, Referrer-Policy, Permissions-Policy,
+    # or HSTS. The audit noted this was a missing DEFENSE-IN-DEPTH layer, not
+    # an exploitable hole on its own (every innerHTML sink in static/app.js
+    # was reviewed and escapes correctly) — a CSP is still the right backstop
+    # for a page rendering third-party web excerpts and (optionally) a
+    # model's report. The page has no external resources at all (self-hosted
+    # CSS/JS only, same-origin fetches only, no images/fonts/CDNs), and the
+    # one remaining inline style="" usage (legend swatch colors in app.js)
+    # was converted to CSS classes (static/app.css's .c-* utilities) so the
+    # policy below needs no 'unsafe-inline' anywhere.
+    _CSP = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self'; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
 
     @app.after_request
     def _headers(resp):
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
+        resp.headers["Content-Security-Policy"] = _CSP
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
+        )
+        # request.is_secure reflects X-Forwarded-Proto once ProxyFix is
+        # active (BEHIND_PROXY=1) — HSTS only makes sense, and is only
+        # honored by browsers, over an actual HTTPS connection.
+        if request.is_secure:
+            resp.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains")
         return resp
 
     @app.route("/")
@@ -619,7 +732,11 @@ def create_app() -> Flask:
         pipeline. Turns a typed name (incl. nicknames FEC can't match) into a
         ranked shortlist the UI shows so the user confirms the exact
         office/cycle. Uses the creator's FEC key; no user key involved."""
-        data = request.get_json(silent=True) or request.form
+        if not _is_same_origin(request):
+            return jsonify({"error": "cross-origin request rejected"}), 403
+        data = _json_body_or_none(request)
+        if data is None:
+            return jsonify({"error": "expected a JSON request body"}), 400
         name = (data.get("name") or "").strip()
         if len(name) < 2:
             return jsonify({"error": "enter a candidate name"}), 400
@@ -648,7 +765,11 @@ def create_app() -> Flask:
     @search_limit
     def search():
         _sweep_old_jobs()
-        data = request.get_json(silent=True) or request.form
+        if not _is_same_origin(request):
+            return jsonify({"error": "cross-origin request rejected"}), 403
+        data = _json_body_or_none(request)
+        if data is None:
+            return jsonify({"error": "expected a JSON request body"}), 400
         name = (data.get("name") or "").strip()
         if len(name) < 2:
             return jsonify({"error": "enter a candidate name"}), 400
@@ -680,6 +801,11 @@ def create_app() -> Flask:
             return jsonify({"error": "invalid state"}), 400
 
         job_id = _new_job()
+        if job_id is None:
+            return jsonify({
+                "error": f"too many searches running right now (max "
+                         f"{_MAX_CONCURRENT_JOBS} concurrent) — try again in a moment",
+            }), 429
         threading.Thread(target=_run_search,
                          args=(job_id, name, fec_key, demo, anthropic_key,
                                candidate_id, candidate_name, office, state),
@@ -687,6 +813,7 @@ def create_app() -> Flask:
         return jsonify({"job_id": job_id, "demo": demo})
 
     @app.route("/status/<job_id>")
+    @status_limit
     def status(job_id):
         with _JOBS_LOCK:
             job = JOBS.get(job_id)

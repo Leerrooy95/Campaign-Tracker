@@ -187,6 +187,14 @@ def collect_statements(candidate: str, searxng_url: Optional[str] = None,
 
 
 # -- SearXNG backend ----------------------------------------------------------
+# `base_url` is operator-controlled today (app.py reads SEARXNG_URL from the
+# environment; it's never a request-scoped or per-user setting), so this is
+# NOT a live SSRF sink the way the page-fetch tier below was — noted here as
+# a design-boundary risk only (Security_Recommendations.md), because the
+# `_search` seam is explicitly documented as pluggable. If `base_url` (or
+# any future search backend's target) EVER becomes reachable from request
+# data, validate it through `_is_safe_url` first, the same guard that closed
+# the page-fetch SSRF finding — don't ship a second copy of that logic.
 def _searxng_search(query: str, base_url: str, count: int) -> list[dict]:
     """Query a SearXNG instance for JSON results. (Enable `json` in the instance's
     settings.yml `search.formats` -- it's HTML-only by default.)"""
@@ -464,17 +472,40 @@ def _http_get_once(url: str) -> tuple[Optional[str], Optional[str]]:
     handled response; both None on any failure."""
     try:
         if _HAVE_CURL:
+            # stream=True + iter_content(): the non-streaming .get() downloads
+            # and decodes the ENTIRE body before resp.text[:_FETCH_MAX_BYTES]
+            # ever slices it, so the documented 256 KB read bound didn't hold
+            # on this (primary, production) transport — a large or slow-drip
+            # page was read fully into memory regardless of the cap
+            # (Security_Recommendations.md MEDIUM; the urllib fallback below
+            # was already correct via resp.read(n)). Reading in bounded
+            # chunks and breaking once the cap is reached, then closing the
+            # connection, is what actually enforces the limit at the socket.
             resp = _curl.get(url, impersonate="chrome", timeout=_FETCH_TIMEOUT,
-                             headers={"Accept": "text/html"}, allow_redirects=False)
-            if resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("Location")
-                return None, urllib.parse.urljoin(url, loc) if loc else None
-            if resp.status_code != 200:
-                return None, None
-            ctype = resp.headers.get("Content-Type", "")
-            if "html" not in ctype and "xml" not in ctype:
-                return None, None
-            return resp.text[:_FETCH_MAX_BYTES], None
+                             headers={"Accept": "text/html"}, allow_redirects=False,
+                             stream=True)
+            try:
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    loc = resp.headers.get("Location")
+                    return None, urllib.parse.urljoin(url, loc) if loc else None
+                if resp.status_code != 200:
+                    return None, None
+                ctype = resp.headers.get("Content-Type", "")
+                if "html" not in ctype and "xml" not in ctype:
+                    return None, None
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= _FETCH_MAX_BYTES:
+                        break   # stop pulling further chunks off the socket
+                raw = b"".join(chunks)[:_FETCH_MAX_BYTES]
+                return raw.decode("utf-8", errors="replace"), None
+            finally:
+                resp.close()   # release the connection now, not at GC time
         req = urllib.request.Request(url, headers={
             "Accept": "text/html", "User-Agent": _BROWSER_UA})
         opener = urllib.request.build_opener(_CapturingRedirectHandler)

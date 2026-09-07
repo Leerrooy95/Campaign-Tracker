@@ -517,6 +517,26 @@ catchable automatically.
   the safe one — this machine only. Set `HOST=0.0.0.0` (or a LAN address) to
   opt into a wider bind; doing so prints a warning to put a reverse proxy
   (TLS + auth) in front first. See Security_Recommendations.md.
+- **Rate limiting is a hard dependency now, `/status` is limited too, and
+  `ProxyFix` is opt-in (post-2026-09-07 fix).** `flask-limiter` used to
+  degrade to a no-op decorator when missing, silently running with NO rate
+  limiting and no warning — it's a plain hard import now, so a broken
+  install fails loudly instead. `/status/<job_id>` (previously unlimited)
+  now carries its own "240 per minute" limit — well above the frontend's
+  750ms poll cadence for a normal handful of concurrent jobs, but bounded.
+  `ProxyFix` (real-client-IP-behind-a-proxy support for the limiter's
+  `key_func`) is applied ONLY when `BEHIND_PROXY=1` is set — applying it
+  unconditionally would let any direct client spoof `X-Forwarded-For` and
+  make the limiter key on a fake IP, trivially bypassing it. Set
+  `BEHIND_PROXY=1` alongside a REAL reverse proxy, never without one.
+- **Concurrent job cap.** Every `/search` used to spawn an unbounded
+  `threading.Thread` (each with its own 8-worker page-fetch pool inside
+  statements.py) — no ceiling, no queue. `_new_job()` now refuses to create
+  a job (`POST /search` returns 429) once `MAX_CONCURRENT_JOBS` (default
+  `8`, env-configurable) RUNNING jobs already exist; a finished job sitting
+  in `JOBS` for polling/export doesn't count against the cap. Check + create
+  happen under one `_JOBS_LOCK` acquisition so two simultaneous requests
+  can't both slip past it.
 - **In-process JOBS dict** is fine single-worker; move to Redis only if you scale
   out.
 - **Launching:** `run.sh` is the launcher — it sources `.env` (if present;
