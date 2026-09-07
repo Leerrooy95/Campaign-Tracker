@@ -206,6 +206,16 @@ const demoTables = CT.buildTables({
   track_a_composition: [{ cycle: 2026, receipts: 10e6, individual_itemized: 7.4e6,
                           _demo: true }],
 });
+// The real app.py demo fixture for track_a_outside is a bare inline dict
+// ({"_demo": True, "support_total": ..., "oppose_total": ...}) with NO
+// "cycle" key — filePrefix must fall back to the top-level result.cycle
+// (always present, real or demo) or a demo export's filename silently loses
+// its "_<cycle>" suffix (flagged in PR #3 review).
+check("demo run's filename still gets a cycle suffix when track_a_outside has none",
+  CT.filePrefix({
+    demo: true, candidate_name: "OSSOFF, T. JONATHAN (demo)", cycle: 2026,
+    track_a_outside: { _demo: true, support_total: 4.1e6, oppose_total: 1.2e6 },
+  }) === "demo_ossoff_t_jonathan_demo_2026");
 check("demo composition rows are exported, not silently dropped",
   demoTables.some(t => t.key === "composition") &&
   demoTables.find(t => t.key === "composition").rows.length === 1);

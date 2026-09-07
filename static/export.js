@@ -203,7 +203,13 @@
   function filePrefix(result) {
     result = result || {};
     const name = (result.candidate_name || result.candidate_id || "candidate");
-    const cyc = (result.track_a_outside && result.track_a_outside.cycle) || "";
+    // track_a_outside.cycle is the precise value (the cycle that spending
+    // pull actually covers), but the DEMO fixture (app.py's inline
+    // track_a_outside dict) never sets it — falling back to the top-level
+    // result.cycle (always present, real or demo) keeps a demo export's
+    // filename from silently losing its "_<cycle>" suffix.
+    const cyc = (result.track_a_outside && result.track_a_outside.cycle)
+      || result.cycle || "";
     let p = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     if (cyc) p += "_" + cyc;
     p = p || "campaign_tracker";

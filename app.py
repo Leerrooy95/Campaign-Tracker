@@ -212,13 +212,18 @@ def _demo_composition() -> list[dict]:
 def _mark_demo(obj):
     """Stamp synthetic data with `_demo: True`, in place, and return it.
 
-    Demo marking used to be inconsistent: track_a_direct/track_a_outside carried
-    "_demo", while composition, record, votes and statements carried nothing at
-    all (the same serializer builds real and demo output for those three), so an
-    exported JSON/CSV that had left the running app had no uniform, machine-
-    checkable way to tell synthetic rows from real ones. Every demo track goes
-    through here now; `result["demo"]` is the authoritative run-level flag.
-    Lists are stamped element-wise (composition is a list of per-cycle dicts)."""
+    Demo marking used to be inconsistent: track_a_direct/track_a_outside were
+    hand-built inline dicts that already carried "_demo" literally, while
+    composition, record, votes and statements carried nothing at all (the same
+    serializer builds real and demo output for those four), so an exported
+    JSON/CSV that had left the running app had no uniform, machine-checkable
+    way to tell synthetic rows from real ones. The four tracks that lacked a
+    marker are now passed through here; track_a_direct/track_a_outside keep
+    their existing inline "_demo" (nothing to fix there — they never lacked
+    the flag) rather than being rewritten to route through this helper too.
+    Every demo track ends up marked one way or the other, and
+    `result["demo"]` is the authoritative run-level flag regardless. Lists are
+    stamped element-wise (composition is a list of per-cycle dicts)."""
     if isinstance(obj, list):
         for item in obj:
             _mark_demo(item)
